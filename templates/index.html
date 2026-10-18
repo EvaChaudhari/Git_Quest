@@ -1,0 +1,862 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06030f">
+  <meta name="description" content="BUG//DUNGEON — Turn GitHub issues into epic debugging quests. Every bug is a boss fight.">
+  <title>BUG//DUNGEON — Developer Quest System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+  <!-- SVG SPRITE DEFS (Zero-dependency crisp vector system) -->
+  <svg xmlns="http://www.w3.org/2000/svg" style="display: none;" aria-hidden="true">
+    <defs>
+      <!-- Swords / Battle -->
+      <symbol id="icon-sword" viewBox="0 0 24 24">
+        <path d="M14.5 2.5l7 7-2 2-2.5-2.5-4 4 1 1-1.5 1.5-1-1-4 4 2 2-1.5 1.5L7 21l-4.5 1 1-4.5 1.5-1.5 2 2 4-4-1-1 1.5-1.5 1 1 4-4-2.5-2.5 2-2zM4.5 19.5l1.5-1.5-1-1-1 1 .5 1.5z"/>
+      </symbol>
+
+      <!-- Shield / Paladin -->
+      <symbol id="icon-shield" viewBox="0 0 24 24">
+        <path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm-1.5 14.5l-3.5-3.5 1.41-1.41L10.5 13.67l5.59-5.59L17.5 9.5l-7 7z"/>
+      </symbol>
+
+      <!-- Lightning / XP -->
+      <symbol id="icon-lightning" viewBox="0 0 24 24">
+        <path d="M11 21h-1l1-7H7.5c-.88 0-.33-.75-.31-.78C8.48 10.94 10.42 7.54 13 3h1l-1 7h3.5c.49 0 .56.33.47.51l-.07.13L11 21z"/>
+      </symbol>
+
+      <!-- Sound On -->
+      <symbol id="icon-volume-on" viewBox="0 0 24 24">
+        <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+      </symbol>
+
+      <!-- Sound Off -->
+      <symbol id="icon-volume-off" viewBox="0 0 24 24">
+        <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27l4.73 4.73H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+      </symbol>
+
+      <!-- Flame Torch -->
+      <symbol id="icon-flame" viewBox="0 0 24 24">
+        <path d="M12 2C9.5 6 7 8.5 7 12.5c0 3 2.2 5.5 5 5.5s5-2.5 5-5.5c0-4-2.5-6.5-5-10.5zm0 13c-1.4 0-2.5-1.1-2.5-2.5 0-1.5 1.2-2.8 2.5-4.5 1.3 1.7 2.5 3 2.5 4.5 0 1.4-1.1 2.5-2.5 2.5z"/>
+      </symbol>
+
+      <!-- NYX Mage / Sorceress -->
+      <symbol id="icon-nyx" viewBox="0 0 24 24">
+        <path d="M12 2L1 21h22L12 2zm0 4.5l6.5 11.5H5.5L12 6.5zM12 9a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm0 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+      </symbol>
+
+      <!-- Merge Conflict Boss -->
+      <symbol id="icon-merge-conflict" viewBox="0 0 24 24">
+        <circle cx="6" cy="6" r="3"/>
+        <circle cx="18" cy="6" r="3"/>
+        <circle cx="12" cy="18" r="3"/>
+        <path d="M7.5 8.5L10.5 15m6-6.5L13.5 15M6 9v3m12-3v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </symbol>
+
+      <!-- Aria Hunter Bow -->
+      <symbol id="icon-aria" viewBox="0 0 24 24">
+        <path d="M2 22l6-6m0 0l-3-3 6-6 3 3m-6 6l6 6 3-3-6-6m0 0l7-7m-7 7L21 3m0 0l-5 1m5-1l-1 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      </symbol>
+
+      <!-- Linus All-Seeing Eye -->
+      <symbol id="icon-linus" viewBox="0 0 24 24">
+        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+      </symbol>
+
+      <!-- Gemma Review Sparkle -->
+      <symbol id="icon-gemma" viewBox="0 0 24 24">
+        <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z"/>
+      </symbol>
+
+      <!-- Rogue Dagger -->
+      <symbol id="icon-rogue" viewBox="0 0 24 24">
+        <path d="M19.7 2.3a1 1 0 0 0-1.4 0L12 8.6 15.4 12l6.3-6.3a1 1 0 0 0 0-1.4l-2-2zM10.6 10L4 16.6V20h3.4l6.6-6.6-3.4-3.4zM3 21h3v-2H5v-1H3v3z"/>
+      </symbol>
+
+      <!-- Python Sorcerer Snake -->
+      <symbol id="icon-sorcerer" viewBox="0 0 24 24">
+        <path d="M14.25 2.5C9.7 2.5 10 4.5 10 4.5v2h4.5v1.5h-6.5c-3.8 0-4.5 2.2-4.5 5.5s1 5.5 4.5 5.5h1.5v-2.25c0-1.8 1.45-3.25 3.25-3.25h4.5c1.5 0 2.25-.8 2.25-2.25v-4.5c0-3.3-.7-6.75-5.25-6.75zm-2 2a.75.75 0 1 1 0 1.5.75.75 0 0 1 0-1.5zm-2.5 9c-1.5 0-2.25.8-2.25 2.25v4.5c0 3.3.7 6.75 5.25 6.75 4.55 0 4.25-2 4.25-2v-2H12.5v-1.5H19c3.8 0 4.5-2.2 4.5-5.5s-1-5.5-4.5-5.5h-1.5v2.25c0 1.8-1.45 3.25-3.25 3.25h-4.5zm4.5 8a.75.75 0 1 1 0 1.5.75.75 0 0 1 0-1.5z"/>
+      </symbol>
+
+      <!-- Rust Artificer Gear -->
+      <symbol id="icon-artificer" viewBox="0 0 24 24">
+        <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+      </symbol>
+
+      <!-- Biome: Feature Forest -->
+      <symbol id="icon-forest" viewBox="0 0 24 24">
+        <path d="M12 2L6 9h3l-4 6h4l-3 5h14l-3-5h4l-4-6h3L12 2zm-1 18h2v2h-2v-2z"/>
+      </symbol>
+
+      <!-- Biome: World Tree -->
+      <symbol id="icon-tree" viewBox="0 0 24 24">
+        <path d="M12 2c-3.31 0-6 2.69-6 6 0 1.95.94 3.69 2.4 4.79C8.16 13.5 8 14.22 8 15c0 2.21 1.79 4 4 4v3h2v-3c2.21 0 4-1.79 4-4 0-.78-.16-1.5-.4-2.21 1.46-1.1 2.4-2.84 2.4-4.79 0-3.31-2.69-6-6-6zm0 2c2.21 0 4 1.79 4 4s-1.79 4-4 4-4-1.79-4-4 1.79-4 4-4z"/>
+      </symbol>
+
+      <!-- Biome: PR Plaza -->
+      <symbol id="icon-plaza" viewBox="0 0 24 24">
+        <path d="M2 20h20v2H2v-2zm2-2V9l3 2 3-2 2 1.33L14 9l3 2 3-2v9H4zm7-4h2v4h-2v-4zM4 7V4h2v3H4zm6 0V4h2v3h-2zm6 0V4h2v3h-2z"/>
+      </symbol>
+
+      <!-- Biome: Bug Swamp -->
+      <symbol id="icon-swamp" viewBox="0 0 24 24">
+        <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-6h4v6z"/>
+      </symbol>
+
+      <!-- Biome: Deprecated Archive -->
+      <symbol id="icon-archive" viewBox="0 0 24 24">
+        <path d="M12 2L2 7v2h20V7L12 2zM4 11v8h2v-8H4zm5 0v8h2v-8H9zm5 0v8h2v-8h-2zm5 0v8h2v-8h-2zM2 20h20v2H2v-2z"/>
+      </symbol>
+
+      <!-- Search / Magnifying Glass -->
+      <symbol id="icon-search" viewBox="0 0 24 24">
+        <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+      </symbol>
+
+      <!-- Lightbulb Hint -->
+      <symbol id="icon-hint" viewBox="0 0 24 24">
+        <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7zm2.85 11.1l-.85.6V16h-4v-2.3l-.85-.6A4.997 4.997 0 0 1 7 9c0-2.76 2.24-5 5-5s5 2.24 5 5c0 1.63-.8 3.16-2.15 4.1z"/>
+      </symbol>
+
+      <!-- Cycle / Refresh -->
+      <symbol id="icon-cycle" viewBox="0 0 24 24">
+        <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+      </symbol>
+
+      <!-- Loot Orb -->
+      <symbol id="icon-orb" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="8"/>
+        <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 14.93V17a1 1 0 0 1-2 0v-.07A6 6 0 0 1 6.07 12H6a1 1 0 0 1 0-2h.07A6 6 0 0 1 11 4.07V4a1 1 0 0 1 2 0v.07A6 6 0 0 1 17.93 11H18a1 1 0 0 1 0 2h-.07A6 6 0 0 1 13 16.93z"/>
+      </symbol>
+
+      <!-- Loot Crown -->
+      <symbol id="icon-crown" viewBox="0 0 24 24">
+        <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z"/>
+      </symbol>
+
+      <!-- Padlock -->
+      <symbol id="icon-lock" viewBox="0 0 24 24">
+        <path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/>
+      </symbol>
+
+      <!-- Achievement Star -->
+      <symbol id="icon-star" viewBox="0 0 24 24">
+        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+      </symbol>
+
+      <!-- Dungeon Gate -->
+      <symbol id="icon-gate" viewBox="0 0 24 24">
+        <path d="M19 4h-2V2h-2v2H9V2H7v2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V8h14v12zm-8-2h2v-6h-2v6z"/>
+      </symbol>
+
+      <!-- Warning Alert -->
+      <symbol id="icon-warning" viewBox="0 0 24 24">
+        <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+      </symbol>
+
+      <!-- Clock / Timer -->
+      <symbol id="icon-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/>
+        <path d="M12 7v5l3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>
+      </symbol>
+
+      <!-- Checkmark -->
+      <symbol id="icon-check" viewBox="0 0 24 24">
+        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <!-- Atmospheric background layers -->
+  <div class="dungeon-fog" aria-hidden="true"></div>
+  <div class="dungeon-fog fog-two" aria-hidden="true"></div>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="ambient ambient-three" aria-hidden="true"></div>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <!-- Floating rune particles -->
+  <div class="rune-particles" aria-hidden="true">
+    <span class="rune">&#x2318;</span><span class="rune">&#x2726;</span><span class="rune">&#x25C8;</span>
+    <span class="rune">&#x2301;</span><span class="rune">&#x2727;</span><span class="rune">&#x2B21;</span>
+    <span class="rune">&#x2300;</span><span class="rune">&#x25C6;</span><span class="rune">&#x2726;</span>
+  </div>
+
+  <div class="app-shell">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="BUG Dungeon home">
+        <div class="brand-emblem">
+          <span class="brand-sword">
+            <svg class="svg-icon"><use href="#icon-sword"></use></svg>
+          </span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">BUG<span class="accent">//</span>DUNGEON</span>
+          <span class="brand-sub mono">DEVELOPER QUEST SYSTEM</span>
+        </div>
+      </a>
+
+      <div class="topbar-center">
+        <div class="hud-stat class-hud-stat" id="topbar-class-stat" title="Current Developer Class">
+          <span class="hud-icon" id="topbar-class-icon">
+            <svg class="svg-icon"><use href="#icon-shield"></use></svg>
+          </span>
+          <span class="mono" id="topbar-class-name">TS PALADIN</span>
+        </div>
+        <div class="hud-stat" title="Total Experience Points">
+          <span class="hud-icon">
+            <svg class="svg-icon"><use href="#icon-lightning"></use></svg>
+          </span>
+          <span class="mono"><span class="xp-val" id="xp-value">0</span> XP</span>
+        </div>
+        <div class="hud-stat" title="Quests Cleared">
+          <span class="hud-icon">
+            <svg class="svg-icon"><use href="#icon-sword"></use></svg>
+          </span>
+          <span class="mono"><span class="completed-val" id="completed-count">0</span> CLEARED</span>
+        </div>
+        <div class="hud-stat" title="Player Level">
+          <span class="level-badge" id="level-badge">LVL 01</span>
+          <span class="mono level-name-display" id="level-name">ROOKIE</span>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <button id="sfx-toggle" class="sfx-btn mono" type="button" title="Toggle sound effects">
+          <svg class="svg-icon" id="sfx-icon"><use href="#icon-volume-on"></use></svg>
+          <span id="sfx-text">SFX: ON</span>
+        </button>
+        <div class="status-pill">
+          <span class="status-dot pulse"></span>
+          <span class="mono">REALM ONLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+
+      <!-- HERO -->
+      <section class="hero">
+        <div class="hero-eyebrow mono">
+          <span class="eyebrow-line"></span>
+          <svg class="svg-icon"><use href="#icon-sword"></use></svg> &nbsp;THE GITVERSE IS IN DANGER&nbsp; <svg class="svg-icon"><use href="#icon-sword"></use></svg>
+          <span class="eyebrow-line"></span>
+        </div>
+        <h1>Every bug is a <span class="gradient-text">boss fight.</span></h1>
+        <p class="hero-copy">
+          Paste any public GitHub repository. Descend into the GitVerse dungeons. Battle merge conflicts,<br>
+          hunt syntax anomalies, claim legendary loot drops, and level up your developer instincts.
+        </p>
+
+        <!-- NPC characters (Interactive - click to hear dialogue) -->
+        <div class="npc-header-label mono">&#x25C8; CLICK ANY REALM NPC TO CONSULT &#x25C8;</div>
+        <div class="npc-row" aria-label="Realm Characters and Bosses">
+          
+          <button type="button" class="npc-card" data-npc="nyx" title="Click to speak with Nyx">
+            <div class="npc-sprite">
+              <div class="sprite-body">
+                <svg class="svg-icon" style="fill: var(--purple);"><use href="#icon-nyx"></use></svg>
+              </div>
+              <div class="sprite-aura aura-purple"></div>
+            </div>
+            <div class="npc-info">
+              <strong>NYX</strong>
+              <span class="mono">AI COMPANION</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card npc-boss-card" data-npc="merge_conflict" title="Click to confront The Merge Conflict">
+            <div class="npc-sprite">
+              <div class="sprite-body">
+                <svg class="svg-icon" style="fill: var(--red);"><use href="#icon-merge-conflict"></use></svg>
+              </div>
+              <div class="sprite-aura aura-red"></div>
+            </div>
+            <div class="npc-info">
+              <strong>MERGE CONFLICT</strong>
+              <span class="mono boss-label">
+                <svg class="svg-icon" style="width: 10px; height: 10px; fill: var(--red);"><use href="#icon-warning"></use></svg> FINAL BOSS
+              </span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="aria" title="Click to speak with Aria">
+            <div class="npc-sprite">
+              <div class="sprite-body">
+                <svg class="svg-icon" style="fill: var(--green);"><use href="#icon-aria"></use></svg>
+              </div>
+              <div class="sprite-aura aura-green"></div>
+            </div>
+            <div class="npc-info">
+              <strong>ARIA</strong>
+              <span class="mono">DEPLOYER GUIDE</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="linus" title="Click to speak with Linus">
+            <div class="npc-sprite">
+              <div class="sprite-body">
+                <svg class="svg-icon" style="fill: var(--gold);"><use href="#icon-linus"></use></svg>
+              </div>
+              <div class="sprite-aura aura-gold"></div>
+            </div>
+            <div class="npc-info">
+              <strong>LINUS</strong>
+              <span class="mono">LEGENDARY NPC</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="gemma" title="Click to speak with Gemma">
+            <div class="npc-sprite">
+              <div class="sprite-body">
+                <svg class="svg-icon" style="fill: var(--cyan);"><use href="#icon-gemma"></use></svg>
+              </div>
+              <div class="sprite-aura aura-cyan"></div>
+            </div>
+            <div class="npc-info">
+              <strong>GEMMA</strong>
+              <span class="mono">CODE REVIEWER</span>
+            </div>
+          </button>
+
+        </div>
+
+        <!-- CLASS SELECTION -->
+        <div class="class-picker-section" aria-label="Choose your class">
+          <div class="class-picker-title mono">
+            <span class="picker-bullet"><svg class="svg-icon"><use href="#icon-sword"></use></svg></span> CHOOSE YOUR DEVELOPER CLASS
+            <span class="class-hint mono">&middot; STREAK FUELS POWER</span>
+          </div>
+          <div class="class-cards" id="class-cards">
+            
+            <button type="button" class="class-card active" data-class="paladin">
+              <div class="class-badge-icon">
+                <svg class="svg-icon" style="fill: var(--purple);"><use href="#icon-shield"></use></svg>
+              </div>
+              <div class="class-details">
+                <span class="class-title">TypeScript Paladin</span>
+                <span class="class-sub mono">Type-Safe Citadel</span>
+                <p class="class-desc">Strict, reliable, principled. Believes type safety is a sacred virtue.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="rogue">
+              <div class="class-badge-icon js">
+                <svg class="svg-icon" style="fill: var(--gold);"><use href="#icon-rogue"></use></svg>
+              </div>
+              <div class="class-details">
+                <span class="class-title">JavaScript Rogue</span>
+                <span class="class-sub mono">Async Shadow</span>
+                <p class="class-desc">Small, agile, easy to lose in a string. Strikes swiftly across the stack.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="sorcerer">
+              <div class="class-badge-icon py">
+                <svg class="svg-icon" style="fill: var(--cyan);"><use href="#icon-sorcerer"></use></svg>
+              </div>
+              <div class="class-details">
+                <span class="class-title">Python Sorcerer</span>
+                <span class="class-sub mono">Data Alchemist</span>
+                <p class="class-desc">Dynamic incantations and indentation rituals. Commands vast data flows.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="artificer">
+              <div class="class-badge-icon rs">
+                <svg class="svg-icon" style="fill: var(--red);"><use href="#icon-artificer"></use></svg>
+              </div>
+              <div class="class-details">
+                <span class="class-title">Rust Artificer</span>
+                <span class="class-sub mono">Memory Forge</span>
+                <p class="class-desc">Zero-cost abstractions. Wields the borrow checker as an unbreakable shield.</p>
+              </div>
+            </button>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- REPO SCANNER -->
+      <section class="repo-panel dungeon-panel" aria-labelledby="repo-title">
+        <div class="panel-torch left-torch" aria-hidden="true">
+          <span class="torch-flame"><svg class="svg-icon"><use href="#icon-flame"></use></svg></span>
+        </div>
+        <div class="panel-torch right-torch" aria-hidden="true">
+          <span class="torch-flame"><svg class="svg-icon"><use href="#icon-flame"></use></svg></span>
+        </div>
+
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker mono">[ 01 / INITIALIZE REALM ]</span>
+            <h2 id="repo-title">Choose your dungeon</h2>
+          </div>
+          <span class="pill pill-purple">
+            <svg class="svg-icon" style="width: 12px; height: 12px;"><use href="#icon-sword"></use></svg> REPOSITORY SCAN
+          </span>
+        </div>
+
+        <form id="repo-form" class="repo-form">
+          <label for="repo-url" class="mono">GITHUB REPOSITORY URL</label>
+          <div class="input-row">
+            <span class="input-prefix mono">&#x21B3;</span>
+            <input id="repo-url" name="repo_url" type="url"
+              placeholder="https://github.com/owner/repository"
+              autocomplete="url" spellcheck="false" required>
+            <button id="scan-button" class="button button-primary" type="submit">
+              <span class="button-label">
+                <svg class="svg-icon btn-icon-svg"><use href="#icon-sword"></use></svg> Enter Dungeon
+              </span>
+              <span aria-hidden="true">&#x2197;</span>
+            </button>
+          </div>
+          <p class="field-hint mono">Paste any public repository to transform its open issues into live RPG quests.</p>
+        </form>
+
+        <div id="global-status" class="status-message" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <!-- WORLD MAP & SECTORS -->
+      <section id="quest-workspace" class="workspace" aria-live="polite">
+
+        <div class="section-title-row">
+          <div>
+            <span class="section-kicker mono">[ 02 / THE GITVERSE OVERWORLD ]</span>
+            <h2><svg class="svg-icon"><use href="#icon-sword"></use></svg> Overworld Dungeon Map</h2>
+          </div>
+          <div class="quest-count mono" id="quest-count">0 QUESTS FOUND</div>
+        </div>
+
+        <div class="world-map dungeon-panel" id="world-map">
+          <div class="map-header">
+            <div>
+              <span class="map-kicker mono">&#x25C8; INTERACTIVE DUNGEON BIOMES</span>
+              <h2 class="map-title">THE DEBUGGING REALM</h2>
+            </div>
+            <div class="map-header-actions">
+              <button id="quick-demo-btn" type="button" class="button button-ghost demo-btn"
+                title="Load sample quests across all 5 sectors">
+                <svg class="svg-icon btn-icon-svg" style="fill: var(--gold);"><use href="#icon-lightning"></use></svg> Load 5-Sector Demo
+              </button>
+              <div class="map-coordinates mono" id="map-coordinates">SECTOR 00 &middot; UNINITIALIZED</div>
+            </div>
+          </div>
+
+          <!-- MAP STAGE -->
+          <div class="map-stage" id="map-stage">
+            <video class="map-video-bg" autoplay loop muted playsinline poster="{{ url_for('static', filename='world_map.png') }}">
+              <source src="{{ url_for('static', filename='world_map.mp4') }}" type="video/mp4">
+            </video>
+            <div class="map-vignette" aria-hidden="true"></div>
+
+            <!-- SVG dungeon paths with glowing traveling pulses -->
+            <svg class="dungeon-paths" aria-hidden="true" viewBox="0 0 800 420" preserveAspectRatio="none">
+              <defs>
+                <filter id="path-glow">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <path class="dpath dpath-green"  d="M 175 195 Q 300 130 400 205" filter="url(#path-glow)"/>
+              <path class="dpath dpath-purple" d="M 400 205 Q 510 180 620 165" filter="url(#path-glow)"/>
+              <path class="dpath dpath-gold"   d="M 400 205 Q 415 295 395 365" filter="url(#path-glow)"/>
+              <path class="dpath dpath-red"    d="M 400 205 Q 280 300 195 325" filter="url(#path-glow)"/>
+              <path class="dpath dpath-cyan"   d="M 620 165 Q 680 225 655 325" filter="url(#path-glow)"/>
+              <circle class="path-dot green-dot"  cx="283" cy="155" r="4"/>
+              <circle class="path-dot purple-dot" cx="510" cy="185" r="4"/>
+              <circle class="path-dot gold-dot"   cx="400" cy="282" r="4"/>
+              <circle class="path-dot red-dot"    cx="302" cy="265" r="4"/>
+              <circle class="path-dot cyan-dot"   cx="645" cy="242" r="4"/>
+            </svg>
+
+            <!-- Feature Forest -->
+            <button class="region-node region-forest" type="button" data-region="forest"
+              data-lore="Where new features grow wild and untamed. High concentration of enhancements."
+              title="Feature Forest: Where new features grow wild and untamed">
+              <span class="node-beacon green"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">
+                  <svg class="svg-icon" style="fill: var(--green);"><use href="#icon-forest"></use></svg>
+                </span>
+                <span class="node-glow-ring green-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">FEATURE FOREST</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- World Tree (Core) -->
+            <button class="region-node region-core" type="button" data-region="core"
+              data-lore="The sacred root of the repository. Core refactoring and architectural battles."
+              title="Main Branch World Tree: Sacred root of the repository">
+              <span class="node-beacon purple"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">
+                  <svg class="svg-icon" style="fill: var(--purple);"><use href="#icon-tree"></use></svg>
+                </span>
+                <span class="node-glow-ring purple-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">WORLD TREE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- PR Plaza -->
+            <button class="region-node region-plaza" type="button" data-region="plaza"
+              data-lore="Where pending merges face judgment. Community contributions and code reviews."
+              title="Pull Request Plaza: Where pending merges face judgment">
+              <span class="node-beacon gold"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">
+                  <svg class="svg-icon" style="fill: var(--gold);"><use href="#icon-plaza"></use></svg>
+                </span>
+                <span class="node-glow-ring gold-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">PR PLAZA</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Bug Swamp -->
+            <button class="region-node region-swamp" type="button" data-region="swamp"
+              data-lore="A murky wasteland of uncaught exceptions and memory leaks. High XP bug bounties."
+              title="Bug Swamp: Murky wasteland of uncaught exceptions">
+              <span class="node-beacon red"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">
+                  <svg class="svg-icon" style="fill: var(--red);"><use href="#icon-swamp"></use></svg>
+                </span>
+                <span class="node-glow-ring red-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">BUG SWAMP</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Deprecated Archive -->
+            <button class="region-node region-archive" type="button" data-region="archive"
+              data-lore="Ancient code that refuses to die. Legacy archaeology and technical documentation."
+              title="Deprecated Archive: Ancient code that refuses to die">
+              <span class="node-beacon cyan"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">
+                  <svg class="svg-icon" style="fill: var(--cyan);"><use href="#icon-archive"></use></svg>
+                </span>
+                <span class="node-glow-ring cyan-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">ARCHIVE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Legend -->
+            <div class="map-legend mono">
+              <span class="legend-item"><i class="legend-dot green"></i>FOREST</span>
+              <span class="legend-item"><i class="legend-dot purple"></i>CORE</span>
+              <span class="legend-item"><i class="legend-dot gold"></i>PLAZA</span>
+              <span class="legend-item"><i class="legend-dot red"></i>SWAMP</span>
+              <span class="legend-item"><i class="legend-dot cyan"></i>ARCHIVE</span>
+            </div>
+          </div><!-- /map-stage -->
+
+          <div id="region-message" class="region-message mono">
+            &#x25C8; Scan a repository or select any dungeon sector above to view active quests.
+          </div>
+        </div><!-- /world-map -->
+
+        <!-- QUEST BOARD -->
+        <div class="section-title-row quest-heading">
+          <div>
+            <span class="section-kicker mono">[ 03 / QUEST BOARD ]</span>
+            <h2><svg class="svg-icon"><use href="#icon-sword"></use></svg> Available Quests</h2>
+          </div>
+          <div class="quest-filter mono" id="quest-filter">ALL REGIONS</div>
+        </div>
+
+        <div class="workspace-grid">
+          <div class="quest-column">
+            <div id="issues-list" class="issues-list">
+              <div class="empty-state dungeon-panel">
+                <div class="empty-dungeon-art" aria-hidden="true">
+                  <span class="empty-torch"><svg class="svg-icon"><use href="#icon-flame"></use></svg></span>
+                  <div class="empty-gate">
+                    <svg class="svg-icon"><use href="#icon-gate"></use></svg>
+                  </div>
+                  <span class="empty-torch"><svg class="svg-icon"><use href="#icon-flame"></use></svg></span>
+                </div>
+                <h3>Your next adventure awaits</h3>
+                <p>Scan a repository to reveal open issues, clues, and quests.</p>
+                <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side Column -->
+          <aside class="side-column">
+
+            <!-- NYX Briefing Panel -->
+            <section class="dungeon-panel briefing-panel" aria-labelledby="briefing-title">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker mono">MISSION CONTROL</span>
+                  <h2 id="briefing-title">Quest Briefing</h2>
+                </div>
+                <span class="orb rotating-orb">
+                  <svg class="svg-icon" style="fill: var(--purple);"><use href="#icon-star"></use></svg>
+                </span>
+              </div>
+
+              <!-- Boss Alert Banner (appears for Boss/Bug Quests) -->
+              <div id="boss-alert-banner" class="boss-alert-banner mono" hidden>
+                <span class="boss-alert-glitch">&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</span>
+                <span>BOSS ENCOUNTER: MERGE CONFLICT DETECTED</span>
+                <span class="boss-alert-glitch">&gt;&gt;&gt;&gt;&gt;&gt;&gt; main</span>
+              </div>
+
+              <div id="briefing-text" class="briefing-text muted">
+                Your companion will brief you once a quest is selected.
+              </div>
+
+              <div class="divider rune-divider">
+                <span><svg class="svg-icon"><use href="#icon-sword"></use></svg></span>
+              </div>
+
+              <div class="companion-head">
+                <div class="nyx-avatar">
+                  <span class="nyx-rune">N</span>
+                  <div class="nyx-ring"></div>
+                </div>
+                <div class="companion-info">
+                  <strong>NYX</strong>
+                  <span class="companion-sub mono">AI DUNGEON COMPANION</span>
+                </div>
+                <span class="live-tag">LIVE</span>
+              </div>
+
+              <div id="companion-dialogue" class="dialogue">
+                <em>&#x201C;A good investigator studies the clues before attacking the boss.&#x201D;</em>
+              </div>
+
+              <div class="action-buttons">
+                <button id="explain-button" class="button button-secondary" type="button" disabled>
+                  <svg class="svg-icon btn-icon-svg"><use href="#icon-search"></use></svg> Explain Issue
+                </button>
+                <button id="hint-button" class="button button-ghost" type="button" disabled>
+                  <svg class="svg-icon btn-icon-svg"><use href="#icon-hint"></use></svg> Get Hint &#x2197;
+                </button>
+              </div>
+
+              <div id="companion-status" class="mini-status mono" role="status" aria-live="polite"></div>
+              <div id="investigation-slot"></div>
+            </section>
+
+            <!-- Player Profile -->
+            <section class="dungeon-panel progress-panel" aria-labelledby="profile-title">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker mono">PLAYER STATUS</span>
+                  <h2 id="profile-title">Investigator Profile</h2>
+                </div>
+                <span class="level-badge" id="profile-level-badge">LVL 01</span>
+              </div>
+
+              <!-- Current Class Card -->
+              <div class="profile-class-banner">
+                <span class="class-banner-icon" id="profile-class-icon">
+                  <svg class="svg-icon"><use href="#icon-shield"></use></svg>
+                </span>
+                <div class="class-banner-text">
+                  <strong id="profile-class-name">TypeScript Paladin</strong>
+                  <span class="mono muted" id="profile-class-sub">Type-Safe Citadel</span>
+                </div>
+              </div>
+
+              <div class="xp-row">
+                <span class="mono">EXPERIENCE POINTS</span>
+                <strong><span class="xp-val" id="profile-xp-value">0</span> XP</strong>
+              </div>
+              <div class="progress-track" aria-label="XP progress">
+                <div id="xp-progress" class="progress-fill" style="width:0%"></div>
+                <div class="progress-glow"></div>
+              </div>
+              <div class="progress-labels mono">
+                <span id="profile-level-name">ROOKIE</span>
+                <span id="next-level">500 XP TO LEVEL 2</span>
+              </div>
+
+              <div class="divider rune-divider">
+                <span>&#x25C8;</span>
+              </div>
+
+              <div class="stats-grid">
+                <div class="stat-cell">
+                  <span class="stat-number completed-val" id="profile-completed-count">0</span>
+                  <span class="stat-label mono">QUESTS CLEARED</span>
+                </div>
+                <div class="stat-cell">
+                  <span class="stat-number" id="step-count">0/5</span>
+                  <span class="stat-label mono">OBJECTIVES</span>
+                </div>
+              </div>
+
+              <div class="divider rune-divider">
+                <span><svg class="svg-icon" style="width: 12px; height: 12px;"><use href="#icon-star"></use></svg></span>
+              </div>
+
+              <div class="badge-row">
+                <div class="badge-icon-wrap">
+                  <span class="badge-icon">
+                    <svg class="svg-icon"><use href="#icon-star"></use></svg>
+                  </span>
+                  <div class="badge-glow"></div>
+                </div>
+                <div>
+                  <strong id="achievement-name">Unranked Investigator</strong>
+                  <p id="achievement-description" class="muted">
+                    Complete your first investigation to earn a badge.
+                  </p>
+                </div>
+              </div>
+
+              <!-- LOOT DROPS INVENTORY -->
+              <div class="divider rune-divider">
+                <span><svg class="svg-icon"><use href="#icon-sword"></use></svg></span>
+              </div>
+              <div class="loot-section">
+                <div class="loot-heading">
+                  <span class="loot-label mono">DUNGEON LOOT DROP</span>
+                  <span class="loot-unlocked-count mono" id="loot-count">0/4 UNLOCKED</span>
+                </div>
+                <div class="loot-slots" id="loot-slots">
+                  
+                  <div class="loot-slot empty" data-loot-id="dagger" data-threshold="1"
+                    title="Console.log Dagger: Unlocks at 1 Quest Cleared">
+                    <span class="slot-art">
+                      <svg class="svg-icon"><use href="#icon-rogue"></use></svg>
+                    </span>
+                    <span class="slot-lock">
+                      <svg class="svg-icon"><use href="#icon-lock"></use></svg>
+                    </span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="shield" data-threshold="2"
+                    title="Pending PR Shield: Unlocks at 2 Quests Cleared">
+                    <span class="slot-art">
+                      <svg class="svg-icon"><use href="#icon-shield"></use></svg>
+                    </span>
+                    <span class="slot-lock">
+                      <svg class="svg-icon"><use href="#icon-lock"></use></svg>
+                    </span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="branch" data-threshold="3"
+                    title="Crystallized Branch: Unlocks at 3 Quests Cleared">
+                    <span class="slot-art">
+                      <svg class="svg-icon"><use href="#icon-orb"></use></svg>
+                    </span>
+                    <span class="slot-lock">
+                      <svg class="svg-icon"><use href="#icon-lock"></use></svg>
+                    </span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="crown" data-threshold="5"
+                    title="Crown of Force Push: Unlocks at 5 Quests Cleared">
+                    <span class="slot-art">
+                      <svg class="svg-icon"><use href="#icon-crown"></use></svg>
+                    </span>
+                    <span class="slot-lock">
+                      <svg class="svg-icon"><use href="#icon-lock"></use></svg>
+                    </span>
+                  </div>
+
+                </div>
+                <div class="loot-item-detail mono" id="loot-detail">
+                  Hover over or unlock gear to inspect lore & stats.
+                </div>
+              </div>
+
+            </section>
+
+            <!-- Linus NPC Wisdom -->
+            <section class="dungeon-panel npc-panel">
+              <div class="ancient-npc">
+                <div class="ancient-portrait">
+                  <span class="ancient-emoji">
+                    <svg class="svg-icon"><use href="#icon-linus"></use></svg>
+                  </span>
+                  <div class="ancient-glow"></div>
+                </div>
+                <div class="ancient-text">
+                  <div class="ancient-header-row">
+                    <span class="mono ancient-name">LINUS &middot; ANCIENT NPC</span>
+                    <button type="button" class="wisdom-btn mono" id="wisdom-btn" title="Hear new wisdom">
+                      <svg class="svg-icon btn-icon-svg" style="width: 10px; height: 10px;"><use href="#icon-cycle"></use></svg> WISDOM
+                    </button>
+                  </div>
+                  <p class="ancient-quote" id="ancient-quote">
+                    <em>&#x201C;Fellow developer, every PR you merged, every bug you squashed — they were training. In the GitVerse, your consistency has power.&#x201D;</em>
+                  </p>
+                </div>
+              </div>
+            </section>
+
+          </aside>
+        </div><!-- /workspace-grid -->
+      </section><!-- /quest-workspace -->
+    </main>
+
+    <!-- NPC Dialogue Modal -->
+    <div id="npc-dialogue-modal" class="npc-modal" hidden>
+      <div class="npc-modal-backdrop" id="npc-modal-close-backdrop"></div>
+      <div class="npc-modal-box dungeon-panel">
+        <div class="npc-modal-header">
+          <div class="npc-modal-avatar" id="modal-npc-avatar">
+            <svg class="svg-icon"><use href="#icon-nyx"></use></svg>
+          </div>
+          <div>
+            <h3 id="modal-npc-name">NYX</h3>
+            <span class="mono modal-npc-title" id="modal-npc-role">AI COMPANION</span>
+          </div>
+          <button type="button" class="modal-close-btn" id="modal-close-btn" aria-label="Close dialog">&times;</button>
+        </div>
+        <div class="divider rune-divider">
+          <span><svg class="svg-icon"><use href="#icon-sword"></use></svg></span>
+        </div>
+        <div class="npc-modal-body" id="modal-npc-speech"></div>
+        <div class="npc-modal-footer mono">
+          <span class="npc-voice-tag">[ VOICE TRANSMISSION COMPLETE ]</span>
+        </div>
+      </div>
+    </div>
+
+    <footer class="dungeon-footer">
+      <div class="footer-inner">
+        <span class="mono footer-brand">
+          <svg class="svg-icon btn-icon-svg"><use href="#icon-sword"></use></svg> BUG//DUNGEON
+        </span>
+        <span class="footer-tagline">Code feeds power. Power conquers dungeons. Dungeons drop loot.</span>
+        <span class="mono footer-build">GITVERSE PROTOCOL &middot; BUILD 005</span>
+      </div>
+    </footer>
+
+  </div><!-- /app-shell -->
+
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
