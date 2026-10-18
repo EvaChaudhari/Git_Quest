@@ -111,5 +111,75 @@ class TestAIService(unittest.TestCase):
         with self.assertRaises(AISchemaValidationError):
             transform_issue_to_quest(self.sample_issue, api_key="test-key")
 
+    def test_build_training_quest_prompt_verified(self):
+        from ai_service import _build_training_quest_prompt
+        evidence = {
+            "status": "verified",
+            "summary": "Resolved via merged PR #105.",
+            "linked_prs": ["https://github.com/org/repo/pull/105"],
+            "merged_prs": ["https://github.com/org/repo/pull/105"],
+            "diff_excerpts": ["+ fixed navbar listener"],
+            "evidence_sources": ["https://github.com/org/repo/pull/105"],
+        }
+        prompt = _build_training_quest_prompt(self.sample_issue, evidence)
+        self.assertIn("STAGE A", prompt.upper())
+        self.assertIn("EVIDENCE STATUS: verified", prompt)
+        self.assertIn("+ fixed navbar listener", prompt)
+
+    @patch("ai_service._get_api_client")
+    def test_transform_training_issue_to_quest_success(self, mock_get_client):
+        from ai_service import transform_training_issue_to_quest, generate_training_quest
+        evidence = {
+            "status": "verified",
+            "summary": "Fixed in PR #105",
+            "evidence_sources": ["https://github.com/org/repo/pull/105"],
+        }
+        training_payload = dict(self.sample_quest_payload)
+        training_payload["stage"] = "A"
+        training_payload["resolution_status"] = "verified"
+        training_payload["resolution_explanation"] = "The bug was resolved by adding optional chaining."
+        training_payload["evidence_sources"] = ["https://github.com/org/repo/pull/105"]
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.text = json.dumps(training_payload)
+        mock_client.models.generate_content.return_value = mock_response
+        mock_get_client.return_value = mock_client
+
+        quest = transform_training_issue_to_quest(self.sample_issue, evidence, api_key="test-key")
+        self.assertEqual(quest.stage, "A")
+        self.assertEqual(quest.resolution_status, "verified")
+        self.assertEqual(quest.resolution_explanation, "The bug was resolved by adding optional chaining.")
+
+        quest_dict = generate_training_quest(self.sample_issue, evidence, api_key="test-key")
+        self.assertEqual(quest_dict["stage"], "A")
+        self.assertEqual(quest_dict["resolution_status"], "verified")
+
+    def test_mask_quest_hints(self):
+        from ai_service import mask_quest_hints
+        sample_quest = dict(self.sample_quest_payload)
+
+        # No unlocked hints
+        masked = mask_quest_hints(sample_quest, unlocked_hint_levels=[])
+        self.assertTrue(masked["hints"][0]["locked"])
+        self.assertIn("[LOCKED", masked["hints"][0]["hint"])
+        self.assertTrue(masked["hints"][1]["locked"])
+        self.assertTrue(masked["hints"][2]["locked"])
+
+        # Level 1 unlocked
+        masked_lvl1 = mask_quest_hints(sample_quest, unlocked_hint_levels=[1])
+        self.assertFalse(masked_lvl1["hints"][0]["locked"])
+        self.assertEqual(masked_lvl1["hints"][0]["hint"], "Check the resize listener.")
+        self.assertTrue(masked_lvl1["hints"][1]["locked"])
+        self.assertIn("[LOCKED", masked_lvl1["hints"][1]["hint"])
+
+        # Levels 1 and 2 unlocked
+        masked_lvl2 = mask_quest_hints(sample_quest, unlocked_hint_levels=[1, 2])
+        self.assertFalse(masked_lvl2["hints"][0]["locked"])
+        self.assertFalse(masked_lvl2["hints"][1]["locked"])
+        self.assertEqual(masked_lvl2["hints"][1]["hint"], "Look at navbar.js line 45.")
+        self.assertTrue(masked_lvl2["hints"][2]["locked"])
+
+
 if __name__ == "__main__":
     unittest.main()

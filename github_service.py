@@ -161,8 +161,61 @@ def _normalize_issue(issue_data: dict[str, Any], owner: str, repo: str) -> dict[
     }
 
 
-def get_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
-    """Retrieve open issues for a given GitHub repository.
+# Constants for resolution evidence
+MAX_PATCH_EXCERPT_CHARS = 2500
+IRRELEVANT_FILE_PATTERNS = (
+    ".lock",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+    "Cargo.lock",
+    ".min.js",
+    ".min.css",
+    ".map",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".pdf",
+)
+
+
+def _sanitize_patch(raw_patch: str) -> str:
+    """Sanitize and truncate unified diff excerpts to safe size, stripping obvious tokens."""
+    if not raw_patch:
+        return ""
+
+    # Mask likely exposed tokens/keys in diffs
+    sanitized = re.sub(
+        r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{8,})['\"]?",
+        r"\1 = '[REDACTED_SECRET]'",
+        raw_patch,
+    )
+
+    if len(sanitized) > MAX_PATCH_EXCERPT_CHARS:
+        sanitized = sanitized[:MAX_PATCH_EXCERPT_CHARS] + "\n... [diff truncated for length]"
+
+    return sanitized
+
+
+def sanitize_diff_patch(filename: str, raw_patch: str) -> Optional[str]:
+    """Sanitize unified diff excerpt for a specific file, skipping unwanted or binary files."""
+    if not filename or not raw_patch:
+        return None
+    if any(filename.endswith(ext) or ext in filename for ext in IRRELEVANT_FILE_PATTERNS):
+        return None
+    return _sanitize_patch(raw_patch)
+
+
+def get_issues(repo_url: str, limit: int = 10, state: str = "open") -> list[dict[str, Any]]:
+    """Retrieve issues for a given GitHub repository.
 
     Excludes pull requests and normalizes each issue into the standard structure.
     Limits results to a maximum of 10 for the prototype.
@@ -170,16 +223,20 @@ def get_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
     Args:
         repo_url: The URL of the GitHub repository.
         limit: Number of issues to retrieve (capped at 10 for prototype).
+        state: State of issues to fetch: 'open', 'closed', or 'all' (defaults to 'open').
 
     Returns:
         A list of normalized issue dictionaries.
 
     Raises:
-        ValueError: If the repository URL is invalid.
+        ValueError: If the repository URL or state parameter is invalid.
         GitHubRepoNotFoundError: If the repository does not exist or is private without token.
         GitHubRateLimitError: If GitHub API rate limit is exceeded.
         GitHubServiceError: For network timeouts, authentication issues, or HTTP errors.
     """
+    if state not in ("open", "closed", "all"):
+        raise ValueError(f"Invalid state '{state}'. Expected 'open', 'closed', or 'all'.")
+
     owner, repo = parse_repo_url(repo_url)
 
     # Prototype restriction: cap results at a maximum of 10
@@ -196,7 +253,7 @@ def get_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
 
     while len(normalized_issues) < target_limit and page <= max_pages:
         params: dict[str, Any] = {
-            "state": "open",
+            "state": state,
             "per_page": 30,
             "page": page,
         }
@@ -267,6 +324,315 @@ def get_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
             )
 
     return normalized_issues
+
+
+def get_closed_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
+    """Retrieve closed issues for a given repository (Stage A learning source)."""
+    return get_issues(repo_url, limit=limit, state="closed")
+
+
+def get_issue_resolution_evidence(
+    owner_or_url: str,
+    repo_or_issue_number: Any,
+    issue_number: Optional[int] = None,
+    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    """Retrieve verified resolution evidence for a closed issue using GitHub REST APIs.
+
+    Inspects issue status, timeline events, linked pull requests, merge status,
+    and changed file diffs. Never invents or assumes a fix without verifiable API evidence.
+
+    Accepts either (repo_url, issue_number) or (owner, repo, issue_number).
+
+    Returns:
+        Standardized resolution evidence dictionary:
+        {
+            "status": "verified" | "partial" | "unavailable",
+            "issue_number": int,
+            "repo": "owner/repo",
+            "issue_url": str,
+            "linked_pr": { ... } | None,
+            "closing_commit": { ... } | None,
+            "files_changed": [ ... ],
+            "patch_excerpt": str | None,
+            "evidence_summary": str,
+            "uncertainty_notes": str | None
+        }
+    """
+    if issue_number is None:
+        owner, repo = parse_repo_url(owner_or_url)
+        issue_number = int(repo_or_issue_number)
+    else:
+        owner = owner_or_url
+        repo = str(repo_or_issue_number)
+        issue_number = int(issue_number)
+
+    base_api = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}"
+    headers = _get_headers()
+    issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
+
+    # 1. Fetch issue details
+    try:
+        issue_resp = requests.get(
+            f"{base_api}/issues/{issue_number}",
+            headers=headers,
+            timeout=timeout,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise GitHubServiceError(f"Network error querying issue #{issue_number}: {exc}") from exc
+
+    if issue_resp.status_code == 404:
+        raise GitHubRepoNotFoundError(f"Issue #{issue_number} or repository '{owner}/{repo}' not found.")
+    elif issue_resp.status_code in (403, 429):
+        raise GitHubRateLimitError("GitHub API rate limit reached while querying resolution evidence.")
+    elif issue_resp.status_code != 200:
+        raise GitHubServiceError(f"Failed to query issue #{issue_number} (status {issue_resp.status_code}).")
+
+    issue_data = issue_resp.json()
+    if issue_data.get("state") != "closed":
+        return {
+            "status": "unavailable",
+            "issue_number": issue_number,
+            "repo": f"{owner}/{repo}",
+            "issue_url": issue_url,
+            "linked_pr": None,
+            "closing_commit": None,
+            "files_changed": [],
+            "patch_excerpt": None,
+            "evidence_summary": "Issue is currently open. No resolution evidence exists.",
+            "uncertainty_notes": "Open issues do not have verified closing resolutions.",
+        }
+
+    # 2. Query Timeline to find linked pull requests or closing commits
+    candidate_pr_number: Optional[int] = None
+    closing_commit_sha: Optional[str] = None
+    closing_commit_url: Optional[str] = None
+
+    try:
+        timeline_resp = requests.get(
+            f"{base_api}/issues/{issue_number}/timeline",
+            headers=headers,
+            params={"per_page": 50},
+            timeout=timeout,
+        )
+        if timeline_resp.status_code == 200:
+            events = timeline_resp.json()
+            if isinstance(events, list):
+                for event in events:
+                    event_type = event.get("event")
+                    if event_type == "cross-referenced":
+                        source = event.get("source", {})
+                        source_issue = source.get("issue", {})
+                        if "pull_request" in source_issue and source_issue.get("number"):
+                            candidate_pr_number = int(source_issue["number"])
+                    elif event_type == "connected":
+                        # Connected project / pull request item
+                        subject = event.get("subject", {})
+                        if subject.get("type") == "PullRequest" and subject.get("number"):
+                            candidate_pr_number = int(subject["number"])
+                    elif event_type == "closed":
+                        commit_id = event.get("commit_id")
+                        if commit_id:
+                            closing_commit_sha = str(commit_id)
+                            closing_commit_url = (
+                                event.get("commit_url")
+                                or f"https://github.com/{owner}/{repo}/commit/{commit_id}"
+                            )
+    except requests.exceptions.RequestException:
+        # Timeline failure does not break; fallback to body regex scan
+        pass
+
+    # Fallback: scan issue body for explicit PR reference (e.g. #1234 or pull/1234)
+    if not candidate_pr_number:
+        body_text = issue_data.get("body") or ""
+        pr_match = re.search(r"(?:pull|pr)[/#](\d+)", body_text, re.IGNORECASE)
+        if pr_match:
+            candidate_pr_number = int(pr_match.group(1))
+
+    # 3. If linked pull request found, inspect PR merge status & changed files
+    if candidate_pr_number:
+        try:
+            pr_resp = requests.get(
+                f"{base_api}/pulls/{candidate_pr_number}",
+                headers=headers,
+                timeout=timeout,
+            )
+            if pr_resp.status_code == 200:
+                pr_data = pr_resp.json()
+                is_merged = bool(pr_data.get("merged") or pr_data.get("merged_at"))
+                pr_title = pr_data.get("title") or "Untitled Pull Request"
+                pr_html_url = pr_data.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{candidate_pr_number}"
+                merge_commit = pr_data.get("merge_commit_sha")
+
+                linked_pr_info = {
+                    "number": candidate_pr_number,
+                    "title": pr_title,
+                    "html_url": pr_html_url,
+                    "merged": is_merged,
+                    "merged_at": pr_data.get("merged_at"),
+                    "merge_commit_sha": merge_commit,
+                }
+
+                if is_merged:
+                    # Fetch changed files
+                    files_resp = requests.get(
+                        f"{base_api}/pulls/{candidate_pr_number}/files",
+                        headers=headers,
+                        params={"per_page": 20},
+                        timeout=timeout,
+                    )
+                    filtered_files: list[dict[str, Any]] = []
+                    collected_patches: list[str] = []
+
+                    if files_resp.status_code == 200:
+                        files_data = files_resp.json()
+                        if isinstance(files_data, list):
+                            for file_item in files_data:
+                                fname = file_item.get("filename", "")
+                                # Skip lockfiles, assets, and binaries
+                                if any(fname.endswith(ext) or ext in fname for ext in IRRELEVANT_FILE_PATTERNS):
+                                    continue
+
+                                filtered_files.append(
+                                    {
+                                        "filename": fname,
+                                        "status": file_item.get("status", "modified"),
+                                        "additions": file_item.get("additions", 0),
+                                        "deletions": file_item.get("deletions", 0),
+                                    }
+                                )
+
+                                raw_patch = file_item.get("patch")
+                                if raw_patch:
+                                    collected_patches.append(f"--- a/{fname}\n+++ b/{fname}\n{raw_patch}")
+
+                    combined_patch = "\n\n".join(collected_patches)
+                    sanitized_patch = _sanitize_patch(combined_patch) if combined_patch else None
+                    linked_url = linked_pr_info.get("html_url")
+                    commit_url = f"https://github.com/{owner}/{repo}/commit/{merge_commit}" if merge_commit else None
+                    sources = [s for s in [linked_url, commit_url] if s]
+
+                    return {
+                        "status": "verified",
+                        "issue_number": issue_number,
+                        "repo": f"{owner}/{repo}",
+                        "issue_url": issue_url,
+                        "linked_pr": linked_pr_info,
+                        "linked_prs": [linked_url] if linked_url else [],
+                        "merged_prs": [linked_url] if linked_url else [],
+                        "closing_commit": {
+                            "sha": merge_commit,
+                            "html_url": commit_url,
+                        } if merge_commit else None,
+                        "closing_commits": [commit_url] if commit_url else [],
+                        "files_changed": filtered_files,
+                        "patch_excerpt": sanitized_patch,
+                        "diff_excerpts": [sanitized_patch] if sanitized_patch else [],
+                        "evidence_summary": f"Issue resolved by merged Pull Request #{candidate_pr_number} ('{pr_title}').",
+                        "summary": f"Issue resolved by merged Pull Request #{candidate_pr_number} ('{pr_title}').",
+                        "uncertainty_notes": None,
+                        "evidence_sources": sources,
+                    }
+
+                else:
+                    # PR exists but was not merged
+                    linked_url = linked_pr_info.get("html_url")
+                    return {
+                        "status": "partial",
+                        "issue_number": issue_number,
+                        "repo": f"{owner}/{repo}",
+                        "issue_url": issue_url,
+                        "linked_pr": linked_pr_info,
+                        "linked_prs": [linked_url] if linked_url else [],
+                        "merged_prs": [],
+                        "closing_commit": None,
+                        "closing_commits": [],
+                        "files_changed": [],
+                        "patch_excerpt": None,
+                        "diff_excerpts": [],
+                        "evidence_summary": f"Linked Pull Request #{candidate_pr_number} ('{pr_title}') was identified, but is closed without being merged.",
+                        "summary": f"Linked Pull Request #{candidate_pr_number} ('{pr_title}') was identified, but is closed without being merged.",
+                        "uncertainty_notes": "PR was closed without merge; fix may have been applied via another branch or abandoned.",
+                        "evidence_sources": [linked_url] if linked_url else [],
+                    }
+        except requests.exceptions.RequestException:
+            pass
+
+    # 4. If direct closing commit found
+    if closing_commit_sha:
+        commit_url = closing_commit_url or f"https://github.com/{owner}/{repo}/commit/{closing_commit_sha}"
+        return {
+            "status": "verified",
+            "issue_number": issue_number,
+            "repo": f"{owner}/{repo}",
+            "issue_url": issue_url,
+            "linked_pr": None,
+            "linked_prs": [],
+            "merged_prs": [],
+            "closing_commit": {
+                "sha": closing_commit_sha,
+                "html_url": commit_url,
+            },
+            "closing_commits": [commit_url],
+            "files_changed": [],
+            "patch_excerpt": None,
+            "diff_excerpts": [],
+            "evidence_summary": f"Issue closed directly by commit {closing_commit_sha[:8]}.",
+            "summary": f"Issue closed directly by commit {closing_commit_sha[:8]}.",
+            "uncertainty_notes": "Direct commit resolution identified without linked pull request.",
+            "evidence_sources": [commit_url],
+        }
+
+    # 5. Unavailable evidence
+    return {
+        "status": "unavailable",
+        "issue_number": issue_number,
+        "repo": f"{owner}/{repo}",
+        "issue_url": issue_url,
+        "linked_pr": None,
+        "linked_prs": [],
+        "merged_prs": [],
+        "closing_commit": None,
+        "closing_commits": [],
+        "files_changed": [],
+        "patch_excerpt": None,
+        "diff_excerpts": [],
+        "evidence_summary": "Issue is closed, but no merged pull request or commit was identified in the issue timeline.",
+        "summary": "Issue is closed, but no merged pull request or commit was identified in the issue timeline.",
+        "uncertainty_notes": "Resolution details could not be verified from the repository timeline.",
+        "evidence_sources": [],
+    }
+
+
+def get_closed_issues_with_evidence(
+    repo_url: str,
+    limit: int = 5,
+    fetch_evidence_details: bool = True,
+) -> list[dict[str, Any]]:
+    """Retrieve closed issues and annotate each with resolution evidence status."""
+    issues = get_closed_issues(repo_url, limit=limit)
+    if not fetch_evidence_details or not issues:
+        return issues
+
+    owner, repo = parse_repo_url(repo_url)
+    annotated: list[dict[str, Any]] = []
+
+    for issue in issues:
+        issue_copy = dict(issue)
+        try:
+            evidence = get_issue_resolution_evidence(owner, repo, int(issue["number"]))
+            issue_copy["evidence_status"] = evidence["status"]
+            issue_copy["evidence_summary"] = evidence["evidence_summary"]
+            issue_copy["linked_pr_number"] = (
+                evidence["linked_pr"]["number"] if evidence.get("linked_pr") else None
+            )
+        except Exception:
+            issue_copy["evidence_status"] = "unavailable"
+            issue_copy["evidence_summary"] = "Evidence check encountered an error."
+
+        annotated.append(issue_copy)
+
+    return annotated
 
 
 if __name__ == "__main__":

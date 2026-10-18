@@ -6,6 +6,8 @@ execute completely offline without requiring internet access or GitHub tokens.
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -357,6 +359,248 @@ class TestAppBackend(unittest.TestCase):
             response.headers.get("Access-Control-Allow-Origin"),
             "http://malicious.example.com",
         )
+
+
+class TestAppTrainingAndGamificationEndpoints(unittest.TestCase):
+    """Integration tests for Stage A training, locked hints, hint unlocking, completions, and profiles."""
+
+    def setUp(self):
+        import tempfile
+        self.temp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.temp_db.close()
+        os.environ["GITQUEST_DB_PATH"] = self.temp_db.name
+
+        from database import init_db
+        init_db(self.temp_db.name)
+
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+
+    def tearDown(self):
+        if os.path.exists(self.temp_db.name):
+            try:
+                os.remove(self.temp_db.name)
+            except OSError:
+                pass
+
+    @patch("app.get_closed_issues_with_evidence")
+    def test_post_training_issues_success(self, mock_get_closed):
+        """POST /api/training/issues returns closed issues with resolution evidence."""
+        mock_issues = [
+            {
+                "number": 50,
+                "title": "Historical Bug",
+                "body": "Fixed in 2025",
+                "labels": ["bug"],
+                "html_url": "https://github.com/owner/repo/issues/50",
+                "repo": "owner/repo",
+                "resolution_evidence": {
+                    "status": "verified",
+                    "summary": "Merged in PR #52",
+                },
+            }
+        ]
+        mock_get_closed.return_value = mock_issues
+
+        response = self.client.post(
+            "/api/training/issues",
+            json={"repo_url": "https://github.com/owner/repo", "limit": 3},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["count"], 1)
+        self.assertEqual(data["issues"][0]["number"], 50)
+        self.assertEqual(data["issues"][0]["resolution_evidence"]["status"], "verified")
+
+    def test_post_training_issues_invalid_payload(self):
+        """POST /api/training/issues without repo_url returns 400."""
+        response = self.client.post("/api/training/issues", json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repo_url", response.get_json()["error"])
+
+    @patch("app.get_issue_resolution_evidence")
+    @patch("app.generate_training_quest")
+    def test_post_training_quest_success(self, mock_gen_training, mock_evidence):
+        """POST /api/training/quest generates Stage A quest with server-verified evidence."""
+        mock_evidence.return_value = {
+            "status": "verified",
+            "summary": "Resolved via PR #52",
+            "evidence_sources": ["https://github.com/owner/repo/pull/52"],
+        }
+        mock_raw_quest = {
+            "quest_id": "quest_owner_repo_50_training",
+            "quest_title": "The Historic Fix",
+            "tagline": "Learn how the bug was solved",
+            "difficulty": "Novice",
+            "category": "Bug Squashing",
+            "xp_reward": 50,
+            "estimated_time_minutes": 20,
+            "stage": "A",
+            "resolution_status": "verified",
+            "resolution_explanation": "Added null check to request parser.",
+            "evidence_sources": ["https://github.com/owner/repo/pull/52"],
+            "briefing": {
+                "lore_intro": "Explore past archives.",
+                "technical_summary": "Bug in request parser.",
+            },
+            "objectives": [
+                {"step": 1, "title": "Inspect Parser", "instruction": "Locate request parser."}
+            ],
+            "hints": [
+                {"level": 1, "tier": "Gentle Nudge", "hint": "Check line 20", "xp_cost": 10}
+            ],
+        }
+        mock_gen_training.return_value = mock_raw_quest
+
+        issue = {"number": 50, "title": "Historical Bug", "repo": "owner/repo"}
+        response = self.client.post("/api/training/quest", json={"issue": issue})
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertIn("quest", data)
+        quest = data["quest"]
+        self.assertEqual(quest["stage"], "A")
+        self.assertEqual(quest["resolution_status"], "verified")
+        self.assertEqual(quest["xp"], 50)
+
+    @patch("app.generate_quest")
+    def test_post_quest_masks_locked_hints(self, mock_gen):
+        """POST /api/quest protects locked hints so text is not leaked before purchase."""
+        mock_raw_quest = {
+            "quest_id": "quest_owner_repo_10",
+            "quest_title": "Active Challenge",
+            "tagline": "Solve the mystery",
+            "difficulty": "Adept",
+            "category": "Bug Squashing",
+            "xp_reward": 100,
+            "estimated_time_minutes": 30,
+            "briefing": {
+                "lore_intro": "Mission briefing",
+                "technical_summary": "Active bug in engine",
+            },
+            "objectives": [
+                {"step": 1, "title": "Step 1", "instruction": "Do something"}
+            ],
+            "hints": [
+                {"level": 1, "tier": "Gentle Nudge", "hint": "SECRET_HINT_1", "xp_cost": 10},
+                {"level": 2, "tier": "Investigation Lead", "hint": "SECRET_HINT_2", "xp_cost": 25},
+            ],
+        }
+        mock_gen.return_value = mock_raw_quest
+
+        issue = {"number": 10, "title": "Open Issue", "repo": "owner/repo"}
+        response = self.client.post("/api/quest", json={"issue": issue})
+        self.assertEqual(response.status_code, 200)
+        quest = response.get_json()["quest"]
+
+        # Both hints should be locked and secret text redacted
+        for h in quest["hints"]:
+            self.assertTrue(h["locked"])
+            self.assertNotIn("SECRET_HINT", h["hint"])
+            self.assertIn("[LOCKED", h["hint"])
+
+    def test_hint_unlock_and_completion_lifecycle(self):
+        """End-to-end gamification lifecycle: complete quest, earn XP, unlock hint, prevent duplicates."""
+        from gamification import record_quest
+        # 1. Seed two quests: Stage A quest and Stage B quest
+        sample_quest_b = {
+            "quest_id": "quest_test_repo_99",
+            "title": "Quest 99",
+            "hints": [
+                {"level": 1, "tier": "Gentle Nudge", "hint": "Reveal Secret 1", "xp_cost": 10},
+                {"level": 2, "tier": "Investigation Lead", "hint": "Reveal Secret 2", "xp_cost": 25},
+            ],
+        }
+        record_quest(
+            quest_id="quest_test_repo_99",
+            repo="test/repo",
+            issue_number=99,
+            stage="B",
+            title="Quest 99",
+            raw_payload=sample_quest_b,
+        )
+        record_quest(
+            quest_id="quest_test_repo_1",
+            repo="test/repo",
+            issue_number=1,
+            stage="A",
+            title="Quest 1",
+        )
+
+        # 2. Try to unlock hint with 0 XP -> should return 400 Insufficient XP
+        resp = self.client.post(
+            "/api/quest/hint/unlock",
+            json={"quest_id": "quest_test_repo_99", "hint_tier": 1},
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("Insufficient XP", resp.get_json()["error"])
+
+        # 3. Complete Stage A quest -> awards 50 XP
+        comp_resp = self.client.post(
+            "/api/quest/complete",
+            json={"quest_id": "quest_test_repo_1", "stage": "A"},
+        )
+        self.assertEqual(comp_resp.status_code, 200)
+        comp_data = comp_resp.get_json()
+        self.assertEqual(comp_data["awarded_xp"], 50)
+        self.assertEqual(comp_data["balance"], 50)
+        self.assertFalse(comp_data["already_completed"])
+
+        # 4. Duplicate completion attempt -> should return 400 with already_completed=True
+        dup_resp = self.client.post(
+            "/api/quest/complete",
+            json={"quest_id": "quest_test_repo_1", "stage": "A"},
+        )
+        self.assertEqual(dup_resp.status_code, 400)
+        self.assertTrue(dup_resp.get_json()["already_completed"])
+
+        # 5. Now unlock hint tier 1 (cost 10 XP) -> succeeds, balance becomes 40
+        unlock_resp = self.client.post(
+            "/api/quest/hint/unlock",
+            json={"quest_id": "quest_test_repo_99", "hint_tier": 1},
+        )
+        self.assertEqual(unlock_resp.status_code, 200)
+        unlock_data = unlock_resp.get_json()
+        self.assertTrue(unlock_data["success"])
+        self.assertEqual(unlock_data["xp_deducted"], 10)
+        self.assertEqual(unlock_data["balance"], 40)
+        self.assertFalse(unlock_data["already_purchased"])
+        self.assertEqual(unlock_data["hint"], "Reveal Secret 1")
+
+        # 6. Re-unlocking tier 1 is free (idempotent)
+        re_resp = self.client.post(
+            "/api/quest/hint/unlock",
+            json={"quest_id": "quest_test_repo_99", "hint_tier": 1},
+        )
+        self.assertEqual(re_resp.status_code, 200)
+        re_data = re_resp.get_json()
+        self.assertTrue(re_data["already_purchased"])
+        self.assertEqual(re_data["xp_deducted"], 0)
+        self.assertEqual(re_data["balance"], 40)
+
+        # 7. Check user profile
+        prof_resp = self.client.get("/api/user/profile")
+        self.assertEqual(prof_resp.status_code, 200)
+        prof_data = prof_resp.get_json()["profile"]
+        self.assertEqual(prof_data["earned_xp"], 40)
+        self.assertEqual(prof_data["stage_a_completed_count"], 1)
+        self.assertFalse(prof_data["stage_b_unlocked"])
+
+    def test_stage_b_progression_threshold(self):
+        """Stage B unlocks only when earned_xp >= 200 and completed_stage_a_count >= 3."""
+        from gamification import record_quest
+        # Complete 4 Stage A quests (each gives 50 XP, total = 200 XP)
+        for i in range(1, 5):
+            qid = f"quest_stage_a_{i}"
+            record_quest(qid, repo="owner/repo", issue_number=i, stage="A", title=f"Quest {i}")
+            res = self.client.post("/api/quest/complete", json={"quest_id": qid, "stage": "A"})
+            self.assertEqual(res.status_code, 200)
+
+        prof_resp = self.client.get("/api/user/profile")
+        self.assertEqual(prof_resp.status_code, 200)
+        prof = prof_resp.get_json()["profile"]
+        self.assertEqual(prof["earned_xp"], 200)
+        self.assertEqual(prof["stage_a_completed_count"], 4)
+        self.assertTrue(prof["stage_b_unlocked"])
 
 
 if __name__ == "__main__":

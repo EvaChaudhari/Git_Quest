@@ -18,8 +18,12 @@ from github_service import (
     GitHubRateLimitError,
     GitHubRepoNotFoundError,
     GitHubServiceError,
+    get_closed_issues,
+    get_closed_issues_with_evidence,
+    get_issue_resolution_evidence,
     get_issues,
     parse_repo_url,
+    sanitize_diff_patch,
 )
 
 
@@ -257,6 +261,120 @@ class TestGetIssuesMocked(unittest.TestCase):
         with self.assertRaises(GitHubServiceError) as ctx:
             get_issues("https://github.com/owner/repo")
         self.assertIn("timed out", str(ctx.exception))
+
+
+class TestResolutionEvidenceMocked(unittest.TestCase):
+    """Unit tests for resolution evidence extraction and diff sanitization."""
+
+    def test_sanitize_diff_patch_redacts_secrets_and_skips_unwanted_files(self):
+        """Sanitizer should redact potential keys and skip lock/minified files."""
+        self.assertIsNone(sanitize_diff_patch("package-lock.json", "+ line"))
+        self.assertIsNone(sanitize_diff_patch("bundle.min.js", "+ line"))
+        self.assertIsNone(sanitize_diff_patch("logo.png", "+ binary"))
+
+        diff = "@@ -1,3 +1,3 @@\n+GEMINI_API_KEY=AIzaSySecretToken\n+valid_code = True"
+        sanitized = sanitize_diff_patch("app.py", diff)
+        self.assertIsNotNone(sanitized)
+        self.assertIn("[REDACTED_SECRET]", sanitized)
+        self.assertIn("valid_code = True", sanitized)
+
+    @patch("requests.get")
+    def test_get_closed_issues(self, mock_get):
+        """get_closed_issues should request state=closed."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"number": 20, "title": "Closed Issue", "body": "Fixed", "labels": []}
+        ]
+        mock_response.links = {}
+        mock_get.return_value = mock_response
+
+        issues = get_closed_issues("https://github.com/owner/repo", limit=1)
+        self.assertEqual(len(issues), 1)
+        self.assertEqual(issues[0]["number"], 20)
+
+    @patch("requests.get")
+    def test_resolution_evidence_verified_with_merged_pr(self, mock_get):
+        """Issue with merged linked PR produces 'verified' evidence."""
+        # 1. Issue details request
+        issue_response = MagicMock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {
+            "number": 101,
+            "state": "closed",
+            "html_url": "https://github.com/owner/repo/issues/101",
+        }
+
+        # 2. Timeline request
+        timeline_response = MagicMock()
+        timeline_response.status_code = 200
+        timeline_response.json.return_value = [
+            {
+                "event": "cross-referenced",
+                "source": {
+                    "issue": {
+                        "number": 202,
+                        "html_url": "https://github.com/owner/repo/pull/202",
+                        "pull_request": {
+                            "url": "https://api.github.com/repos/owner/repo/pulls/202",
+                            "merged_at": "2026-01-01T12:00:00Z",
+                            "html_url": "https://github.com/owner/repo/pull/202",
+                        },
+                    }
+                },
+            }
+        ]
+
+        # 3. PR details request
+        pr_response = MagicMock()
+        pr_response.status_code = 200
+        pr_response.json.return_value = {
+            "number": 202,
+            "merged": True,
+            "merged_at": "2026-01-01T12:00:00Z",
+            "html_url": "https://github.com/owner/repo/pull/202",
+            "title": "Fix navbar collapse",
+        }
+
+        # 4. PR files request
+        files_response = MagicMock()
+        files_response.status_code = 200
+        files_response.json.return_value = [
+            {
+                "filename": "navbar.js",
+                "patch": "@@ -10,3 +10,4 @@\n+ if (!menu) return;",
+                "status": "modified",
+            }
+        ]
+
+        mock_get.side_effect = [issue_response, timeline_response, pr_response, files_response]
+
+        evidence = get_issue_resolution_evidence("https://github.com/owner/repo", 101)
+        self.assertEqual(evidence["status"], "verified")
+        self.assertIn("https://github.com/owner/repo/pull/202", evidence["linked_prs"])
+        self.assertIn("https://github.com/owner/repo/pull/202", evidence["merged_prs"])
+        self.assertTrue(any("if (!menu) return;" in d for d in evidence["diff_excerpts"]))
+
+    @patch("requests.get")
+    def test_resolution_evidence_unavailable_when_no_links(self, mock_get):
+        """Issue with empty timeline produces 'unavailable' evidence."""
+        issue_response = MagicMock()
+        issue_response.status_code = 200
+        issue_response.json.return_value = {
+            "number": 102,
+            "state": "closed",
+            "html_url": "https://github.com/owner/repo/issues/102",
+        }
+
+        timeline_response = MagicMock()
+        timeline_response.status_code = 200
+        timeline_response.json.return_value = []
+        mock_get.side_effect = [issue_response, timeline_response]
+
+        evidence = get_issue_resolution_evidence("https://github.com/owner/repo", 102)
+        self.assertEqual(evidence["status"], "unavailable")
+        self.assertEqual(evidence["linked_prs"], [])
+        self.assertEqual(evidence["merged_prs"], [])
 
 
 class TestLiveSmoke(unittest.TestCase):

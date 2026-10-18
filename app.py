@@ -1,6 +1,7 @@
 """GitQuest backend Flask application.
 
-Provides endpoints for health checking and GitHub repository issue retrieval.
+Provides endpoints for health checking, repository issue exploration,
+Stage A training quests, Stage B open-issue challenges, and gamification.
 """
 
 from __future__ import annotations
@@ -18,16 +19,38 @@ from ai_service import (
     AISchemaValidationError,
     AIServiceError,
     generate_quest,
+    generate_training_quest,
+    mask_quest_hints,
+)
+from database import DEMO_USER_ID, init_db
+from gamification import (
+    DEFAULT_CONFIG,
+    DuplicateQuestCompletionError,
+    InsufficientXPError,
+    InvalidHintTierError,
+    QuestNotFoundError,
+    UserNotFoundError,
+    award_quest_completion,
+    get_quest,
+    get_unlocked_hints,
+    get_user_profile,
+    purchase_hint,
+    record_quest,
 )
 from github_service import (
     GitHubRateLimitError,
     GitHubRepoNotFoundError,
     GitHubServiceError,
+    get_closed_issues_with_evidence,
+    get_issue_resolution_evidence,
     get_issues,
 )
 
 # Load environment variables from .env if present
 load_dotenv()
+
+# Initialize SQLite database schema
+init_db()
 
 # Configure logging without echoing request bodies or secrets
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -35,15 +58,15 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configure CORS specifically for development frontend origins on API routes
+# Configure CORS specifically for development and configured frontend origins on API routes
+_raw_origins = os.getenv("GITQUEST_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
 CORS(
     app,
     resources={
         r"/api/*": {
-            "origins": [
-                "http://localhost:3000",
-                "http://localhost:5173",
-            ]
+            "origins": ALLOWED_ORIGINS
         }
     },
 )
@@ -53,17 +76,21 @@ CORS(
 def index():
     """Root endpoint.
 
-    Serves a minimal temporary JSON response. Can be replaced or extended
-    when the frontend integration is provided.
+    Serves API metadata and available endpoint routes.
     """
     return (
         jsonify(
             {
                 "message": "GitQuest Backend API is running.",
                 "endpoints": {
-                    "health": "/health",
+                    "health": "/health (GET)",
                     "issues": "/api/issues (POST)",
                     "quest": "/api/quest (POST)",
+                    "training_issues": "/api/training/issues (POST)",
+                    "training_quest": "/api/training/quest (POST)",
+                    "hint_unlock": "/api/quest/hint/unlock (POST)",
+                    "quest_complete": "/api/quest/complete (POST)",
+                    "user_profile": "/api/user/profile (GET)",
                 },
             }
         ),
@@ -158,6 +185,80 @@ def fetch_issues():
     except Exception:
         # Catch-all to prevent stack traces or internal secrets leaking
         logger.exception("Unexpected error processing /api/issues request.")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route("/api/training/issues", methods=["POST"])
+def fetch_training_issues():
+    """Retrieve closed issues with resolution evidence for a specified GitHub repository.
+
+    Expects JSON body:
+        {"repo_url": "https://github.com/owner/repo", "limit": 5}
+
+    Returns:
+        JSON response with closed issues list and count:
+        {
+            "issues": [...],
+            "count": 0
+        }
+    """
+    if not request.is_json:
+        return (
+            jsonify({"error": "Request body must be JSON with Content-Type: application/json."}),
+            400,
+        )
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return (
+            jsonify({"error": "Invalid JSON payload. Expected a JSON object."}),
+            400,
+        )
+
+    repo_url = data.get("repo_url")
+    if not repo_url or not isinstance(repo_url, str) or not repo_url.strip():
+        return (
+            jsonify({"error": "Field 'repo_url' is required and must be a non-empty string."}),
+            400,
+        )
+
+    limit = data.get("limit", 5)
+    if not isinstance(limit, int):
+        return (
+            jsonify({"error": "Field 'limit' must be an integer if provided."}),
+            400,
+        )
+
+    try:
+        issues = get_closed_issues_with_evidence(repo_url.strip(), limit=limit)
+        return (
+            jsonify(
+                {
+                    "issues": issues,
+                    "count": len(issues),
+                }
+            ),
+            200,
+        )
+
+    except ValueError as err:
+        logger.warning("Invalid repository URL provided: %s", str(err))
+        return jsonify({"error": str(err)}), 400
+
+    except GitHubRepoNotFoundError as err:
+        logger.info("Repository not found: %s", str(err))
+        return jsonify({"error": str(err)}), 404
+
+    except GitHubRateLimitError as err:
+        logger.warning("GitHub rate limit encountered: %s", str(err))
+        return jsonify({"error": str(err)}), 429
+
+    except GitHubServiceError as err:
+        logger.error("GitHub service error: %s", str(err))
+        return jsonify({"error": str(err)}), 502
+
+    except Exception:
+        logger.exception("Unexpected error processing /api/training/issues request.")
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
@@ -315,14 +416,34 @@ def generate_quest_endpoint():
         raw_quest = generate_quest(issue, **kwargs)
         validated_quest = _validate_and_format_quest(raw_quest)
 
+        quest_id = validated_quest.get("quest_id") or f"quest_{issue['repo'].replace('/', '_')}_{issue['number']}"
+        validated_quest["quest_id"] = quest_id
+        validated_quest["stage"] = "B"
+
+        # Record in database for progression and hint tracking
+        record_quest(
+            quest_id=quest_id,
+            repo=issue["repo"],
+            issue_number=issue["number"],
+            stage="B",
+            title=validated_quest.get("title", f"Challenge #{issue['number']}"),
+            difficulty=validated_quest.get("difficulty", "Novice"),
+            base_xp=int(validated_quest.get("xp", 100)),
+            raw_payload=validated_quest,
+        )
+
+        # Protect locked hints: mask them so locked hints are never leaked
+        unlocked_hint_tiers = get_unlocked_hints(quest_id=quest_id, user_id=DEMO_USER_ID)
+        safe_quest = mask_quest_hints(validated_quest, unlocked_hint_levels=unlocked_hint_tiers)
+
         logger.info(
             "Successfully generated quest '%s' (xp: %s) for issue #%s",
-            validated_quest.get("quest_id", validated_quest.get("title")),
-            validated_quest.get("xp"),
+            quest_id,
+            safe_quest.get("xp"),
             issue["number"],
         )
 
-        return jsonify({"quest": validated_quest}), 200
+        return jsonify({"quest": safe_quest}), 200
 
     except ValueError as err:
         logger.warning("Validation error in /api/quest: %s", str(err))
@@ -351,6 +472,287 @@ def generate_quest_endpoint():
 
     except Exception:
         logger.exception("Unexpected error processing /api/quest request.")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route("/api/training/quest", methods=["POST"])
+def generate_training_quest_endpoint():
+    """Generate a Stage A training quest from a closed GitHub issue and verified evidence.
+
+    Expects JSON body:
+        {"issue": {"number": 1, "title": "...", "repo": "...", ...}}
+
+    Optional fields:
+        "model": optional Gemma/Gemini model name override.
+    """
+    if not request.is_json:
+        return (
+            jsonify({"error": "Request body must be JSON with Content-Type: application/json."}),
+            400,
+        )
+
+    data = request.get_json(silent=True)
+    issue, error = _validate_and_normalize_issue_payload(data)
+    if error or not issue:
+        return jsonify({"error": error or "Invalid issue payload."}), 400
+
+    model_override = data.get("model") if isinstance(data, dict) else None
+    kwargs: dict[str, Any] = {}
+    if isinstance(model_override, str) and model_override.strip():
+        kwargs["model"] = model_override.strip()
+
+    repo = issue["repo"]
+    issue_number = issue["number"]
+
+    # Authoritative resolution evidence retrieval on the server (never trust client evidence)
+    try:
+        evidence = get_issue_resolution_evidence(repo, issue_number)
+    except Exception as exc:
+        logger.warning("Failed to fetch resolution evidence for %s#%s: %s", repo, issue_number, exc)
+        evidence = {
+            "status": "unavailable",
+            "issue_number": issue_number,
+            "repo": repo,
+            "summary": "Resolution evidence could not be retrieved from GitHub.",
+            "evidence_sources": [],
+        }
+
+    try:
+        raw_quest = generate_training_quest(issue, resolution_evidence=evidence, **kwargs)
+        validated_quest = _validate_and_format_quest(raw_quest)
+
+        quest_id = validated_quest.get("quest_id") or f"quest_{repo.replace('/', '_')}_{issue_number}_training"
+        validated_quest["quest_id"] = quest_id
+        validated_quest["stage"] = "A"
+
+        # Record quest in database with standard Stage A reward (50 XP)
+        record_quest(
+            quest_id=quest_id,
+            repo=repo,
+            issue_number=issue_number,
+            stage="A",
+            title=validated_quest.get("title", f"Training Quest #{issue_number}"),
+            difficulty=validated_quest.get("difficulty", "Novice"),
+            base_xp=int(DEFAULT_CONFIG.stage_a_completion_xp),
+            raw_payload=validated_quest,
+        )
+
+        return jsonify({"quest": validated_quest}), 200
+
+    except ValueError as err:
+        logger.warning("Validation error in /api/training/quest: %s", str(err))
+        return jsonify({"error": str(err)}), 400
+
+    except AIKeyMissingError as err:
+        logger.error("AI service configuration error: %s", str(err))
+        return (
+            jsonify({"error": "AI service is not configured (missing API key)."}),
+            503,
+        )
+
+    except AISchemaValidationError as err:
+        logger.error("AI service schema validation error: %s", str(err))
+        return (
+            jsonify({"error": "Failed to generate a valid quest from the AI service response."}),
+            502,
+        )
+
+    except AIServiceError as err:
+        logger.error("AI service error: %s", str(err))
+        return (
+            jsonify({"error": "AI quest generation service encountered an error."}),
+            502,
+        )
+
+    except Exception:
+        logger.exception("Unexpected error processing /api/training/quest request.")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route("/api/quest/hint/unlock", methods=["POST"])
+def unlock_hint_endpoint():
+    """Unlock a progressive hint tier using the demo user's earned XP.
+
+    Expects JSON body:
+        {"quest_id": "quest_owner_repo_101", "hint_tier": 1}
+
+    Returns HTTP 200 with unlocked hint and updated balance on success,
+    or HTTP 400 with safe error on insufficient balance / invalid tier.
+    """
+    if not request.is_json:
+        return (
+            jsonify({"error": "Request body must be JSON with Content-Type: application/json."}),
+            400,
+        )
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return (
+            jsonify({"error": "Invalid JSON payload. Expected a JSON object."}),
+            400,
+        )
+
+    quest_id = data.get("quest_id")
+    if not quest_id or not isinstance(quest_id, str) or not quest_id.strip():
+        return (
+            jsonify({"error": "Field 'quest_id' is required and must be a non-empty string."}),
+            400,
+        )
+    quest_id = quest_id.strip()
+
+    raw_tier = data.get("hint_tier") if "hint_tier" in data else data.get("hint_level")
+    if raw_tier is None or not isinstance(raw_tier, int) or isinstance(raw_tier, bool):
+        return (
+            jsonify({"error": "Field 'hint_tier' (or 'hint_level') is required and must be an integer (1, 2, or 3)."}),
+            400,
+        )
+    hint_tier = int(raw_tier)
+
+    try:
+        result = purchase_hint(
+            quest_id=quest_id,
+            hint_tier=hint_tier,
+            user_id=DEMO_USER_ID,
+        )
+
+        # Retrieve hint details from stored quest payload if available
+        stored_quest = get_quest(quest_id)
+        hint_text = "Progressive guidance unlocked."
+        tier_name = f"Tier {hint_tier}"
+        if stored_quest and stored_quest.get("parsed_payload"):
+            payload = stored_quest["parsed_payload"]
+            for h in payload.get("hints", []):
+                if isinstance(h, dict) and h.get("level") == hint_tier:
+                    hint_text = h.get("hint", hint_text)
+                    tier_name = h.get("tier", tier_name)
+                    break
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "quest_id": quest_id,
+                    "hint_tier": hint_tier,
+                    "tier_name": tier_name,
+                    "xp_deducted": result["xp_deducted"],
+                    "balance": result["balance"],
+                    "already_purchased": result["already_purchased"],
+                    "hint": hint_text,
+                    "unlocked_hint": {
+                        "level": hint_tier,
+                        "tier": tier_name,
+                        "hint": hint_text,
+                        "locked": False,
+                    },
+                }
+            ),
+            200,
+        )
+
+    except InvalidHintTierError as err:
+        return jsonify({"error": str(err)}), 400
+
+    except InsufficientXPError as err:
+        return jsonify({"error": str(err)}), 400
+
+    except QuestNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+
+    except Exception:
+        logger.exception("Unexpected error processing /api/quest/hint/unlock request.")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route("/api/quest/complete", methods=["POST"])
+def complete_quest_endpoint():
+    """Record completion of a quest and award authoritative XP and habit consistency.
+
+    Expects JSON body:
+        {"quest_id": "quest_owner_repo_101", "stage": "A" (optional)}
+
+    Prevents duplicate XP awards and duplicate habit streaks.
+    """
+    if not request.is_json:
+        return (
+            jsonify({"error": "Request body must be JSON with Content-Type: application/json."}),
+            400,
+        )
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return (
+            jsonify({"error": "Invalid JSON payload. Expected a JSON object."}),
+            400,
+        )
+
+    quest_id = data.get("quest_id")
+    if not quest_id or not isinstance(quest_id, str) or not quest_id.strip():
+        return (
+            jsonify({"error": "Field 'quest_id' is required and must be a non-empty string."}),
+            400,
+        )
+    quest_id = quest_id.strip()
+
+    # Determine stage: explicitly supplied, or resolved from database record
+    stage = data.get("stage")
+    if not stage or stage not in ("A", "B"):
+        stored_quest = get_quest(quest_id)
+        stage = stored_quest.get("stage", "B") if stored_quest else "B"
+
+    try:
+        result = award_quest_completion(
+            quest_id=quest_id,
+            stage=stage,
+            user_id=DEMO_USER_ID,
+        )
+
+        return (
+            jsonify(
+                {
+                    "success": True,
+                    "quest_id": quest_id,
+                    "stage": stage,
+                    "awarded_xp": result["awarded_xp"],
+                    "balance": result["balance"],
+                    "consistency_score": result["consistency_score"],
+                    "stage_b_unlocked": result["stage_b_unlocked"],
+                    "already_completed": False,
+                    "message": f"Quest '{quest_id}' completed successfully.",
+                }
+            ),
+            200,
+        )
+
+    except DuplicateQuestCompletionError as err:
+        return (
+            jsonify(
+                {
+                    "error": str(err),
+                    "already_completed": True,
+                    "quest_id": quest_id,
+                }
+            ),
+            400,
+        )
+
+    except QuestNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+
+    except Exception:
+        logger.exception("Unexpected error processing /api/quest/complete request.")
+        return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.route("/api/user/profile", methods=["GET"])
+def get_user_profile_endpoint():
+    """Retrieve demo user gamification stats, XP balance, habit consistency, and Stage B unlock status."""
+    try:
+        profile = get_user_profile(user_id=DEMO_USER_ID)
+        return jsonify({"profile": profile}), 200
+    except UserNotFoundError as err:
+        return jsonify({"error": str(err)}), 404
+    except Exception:
+        logger.exception("Unexpected error processing /api/user/profile request.")
         return jsonify({"error": "An internal server error occurred."}), 500
 
 
