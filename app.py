@@ -11,7 +11,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 from flask_cors import CORS
 
 from ai_service import (
@@ -76,8 +76,13 @@ CORS(
 def index():
     """Root endpoint.
 
-    Serves API metadata and available endpoint routes.
+    Serves the interactive frontend web application when accessed via a browser,
+    or API metadata JSON for API consumers and automated tests.
     """
+    accept = request.headers.get("Accept", "")
+    if "text/html" in accept and not accept.startswith("*/*"):
+        return render_template("index.html")
+
     return (
         jsonify(
             {
@@ -96,6 +101,13 @@ def index():
         ),
         200,
     )
+
+
+@app.route("/app", methods=["GET"])
+@app.route("/play", methods=["GET"])
+def serve_app():
+    """Serve the GitQuest interactive application directly."""
+    return render_template("index.html")
 
 
 @app.route("/health", methods=["GET"])
@@ -310,6 +322,11 @@ def _validate_and_normalize_issue_payload(data: Any) -> tuple[dict[str, Any] | N
         "labels": [str(l) for l in labels] if isinstance(labels, list) else [],
         "html_url": html_url.strip() if isinstance(html_url, str) else f"https://github.com/{repo.strip()}/issues/{number}",
     }
+
+    raw_state = issue.get("state")
+    if raw_state is not None and isinstance(raw_state, str):
+        clean_issue["state"] = raw_state.strip().lower()
+
     return clean_issue, None
 
 
@@ -398,6 +415,12 @@ def generate_quest_endpoint():
     issue, error = _validate_and_normalize_issue_payload(data)
     if error or not issue:
         return jsonify({"error": error or "Invalid issue payload."}), 400
+
+    if issue.get("state") == "closed":
+        return (
+            jsonify({"error": "Stage B challenges require an open issue. For closed issues, use /api/training/quest."}),
+            400,
+        )
 
     # Optional model override
     model_override = data.get("model") if isinstance(data, dict) else None
@@ -496,6 +519,12 @@ def generate_training_quest_endpoint():
     if error or not issue:
         return jsonify({"error": error or "Invalid issue payload."}), 400
 
+    if issue.get("state") == "open":
+        return (
+            jsonify({"error": "Stage A training quests require a closed issue with resolution evidence. For open issues, use /api/quest."}),
+            400,
+        )
+
     model_override = data.get("model") if isinstance(data, dict) else None
     kwargs: dict[str, Any] = {}
     if isinstance(model_override, str) and model_override.strip():
@@ -537,7 +566,11 @@ def generate_training_quest_endpoint():
             raw_payload=validated_quest,
         )
 
-        return jsonify({"quest": validated_quest}), 200
+        # Protect locked hints: mask them so locked hints are never leaked
+        unlocked_hint_tiers = get_unlocked_hints(quest_id=quest_id, user_id=DEMO_USER_ID)
+        safe_quest = mask_quest_hints(validated_quest, unlocked_hint_levels=unlocked_hint_tiers)
+
+        return jsonify({"quest": safe_quest}), 200
 
     except ValueError as err:
         logger.warning("Validation error in /api/training/quest: %s", str(err))
@@ -607,6 +640,9 @@ def unlock_hint_endpoint():
             400,
         )
     hint_tier = int(raw_tier)
+
+    if not get_quest(quest_id):
+        return jsonify({"error": f"Quest '{quest_id}' not found."}), 404
 
     try:
         result = purchase_hint(
@@ -693,10 +729,13 @@ def complete_quest_endpoint():
         )
     quest_id = quest_id.strip()
 
+    stored_quest = get_quest(quest_id)
+    if not stored_quest:
+        return jsonify({"error": f"Quest '{quest_id}' not found."}), 404
+
     # Determine stage: explicitly supplied, or resolved from database record
     stage = data.get("stage")
     if not stage or stage not in ("A", "B"):
-        stored_quest = get_quest(quest_id)
         stage = stored_quest.get("stage", "B") if stored_quest else "B"
 
     try:

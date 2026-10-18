@@ -60,12 +60,14 @@ def parse_repo_url(repo_url: str) -> tuple[str, str]:
     cleaned_url = repo_url.strip()
     parsed = urlparse(cleaned_url)
 
-    # Permit URLs passed without scheme (e.g. github.com/owner/repo)
-    if not parsed.scheme and (
-        cleaned_url.startswith("github.com/") or cleaned_url.startswith("www.github.com/")
-    ):
-        cleaned_url = f"https://{cleaned_url}"
-        parsed = urlparse(cleaned_url)
+    # Permit URLs passed without scheme (e.g. github.com/owner/repo or owner/repo)
+    if not parsed.scheme:
+        if cleaned_url.startswith("github.com/") or cleaned_url.startswith("www.github.com/"):
+            cleaned_url = f"https://{cleaned_url}"
+            parsed = urlparse(cleaned_url)
+        elif "/" in cleaned_url and len(cleaned_url.split("/")) == 2 and not any(c in cleaned_url for c in " :?#"):
+            cleaned_url = f"https://github.com/{cleaned_url}"
+            parsed = urlparse(cleaned_url)
 
     if parsed.scheme.lower() not in ("http", "https"):
         raise ValueError(
@@ -121,7 +123,7 @@ def _get_headers() -> dict[str, str]:
     }
 
     token = os.getenv("GITHUB_TOKEN")
-    if token and token.strip():
+    if token and token.strip() and not token.strip().startswith("your_"):
         headers["Authorization"] = f"Bearer {token.strip()}"
 
     return headers

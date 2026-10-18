@@ -40,6 +40,12 @@ class TestAppBackend(unittest.TestCase):
         self.assertIn("message", data)
         self.assertIn("endpoints", data)
 
+    def test_root_endpoint_html_for_browsers(self):
+        """GET / with Accept: text/html returns the frontend HTML."""
+        response = self.client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("BUG//DUNGEON", response.get_data(as_text=True))
+
     def test_post_issues_valid_url(self):
         """POST /api/issues returns normalized issues and count."""
         mock_issues = [
@@ -294,6 +300,15 @@ class TestAppBackend(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("body", response.get_json()["error"])
 
+    def test_post_quest_closed_issue_rejected_400(self):
+        """POST /api/quest rejects closed issues since Stage B requires open issues."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "Closed bug", "repo": "owner/repo", "number": 10, "state": "closed"}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Stage B challenges require an open issue", response.get_json()["error"])
+
     def test_post_quest_missing_api_key_503(self):
         """POST /api/quest when AI key is missing returns 503 gracefully."""
         from ai_service import AIKeyMissingError
@@ -461,6 +476,13 @@ class TestAppTrainingAndGamificationEndpoints(unittest.TestCase):
         self.assertEqual(quest["stage"], "A")
         self.assertEqual(quest["resolution_status"], "verified")
         self.assertEqual(quest["xp"], 50)
+
+    def test_post_training_quest_open_issue_rejected_400(self):
+        """POST /api/training/quest rejects open issues since Stage A requires closed issues."""
+        issue = {"number": 50, "title": "Open Issue", "repo": "owner/repo", "state": "open"}
+        response = self.client.post("/api/training/quest", json={"issue": issue})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Stage A training quests require a closed issue", response.get_json()["error"])
 
     @patch("app.generate_quest")
     def test_post_quest_masks_locked_hints(self, mock_gen):

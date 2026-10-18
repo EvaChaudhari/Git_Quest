@@ -289,15 +289,53 @@ def get_user_profile(
             and stage_a_count >= config.stage_b_unlock_stage_a_completions
         )
 
+        # Count completed Stage B quests and purchased hints
+        stage_b_count = max(0, total_completed - stage_a_count)
+        hints_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM hint_purchases WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        purchased_hints_count = int(hints_row["cnt"]) if hints_row else 0
+
+        # Authoritative list of completed quest IDs
+        completions_rows = conn.execute(
+            "SELECT quest_id FROM quest_completions WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        completed_quest_ids = [r["quest_id"] for r in completions_rows]
+
+        # Authoritative list of purchased hints
+        hint_purchases_rows = conn.execute(
+            "SELECT quest_id, hint_tier FROM hint_purchases WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        purchased_hints = [
+            {"quest_id": r["quest_id"], "hint_tier": int(r["hint_tier"])}
+            for r in hint_purchases_rows
+        ]
+
         return {
             "user_id": row["id"],
             "username": row["username"],
             "earned_xp": earned_xp,
+            "xp_balance": earned_xp,
             "consistency_score": current_consistency,
             "stage_b_unlocked": stage_b_unlocked,
             "stage_a_completed_count": stage_a_count,
+            "completed_stage_a_count": stage_a_count,
+            "completed_stage_b_count": stage_b_count,
             "total_completed_count": total_completed,
+            "completed_quests_count": total_completed,
+            "purchased_hints_count": purchased_hints_count,
+            "completed_quest_ids": completed_quest_ids,
+            "purchased_hints": purchased_hints,
             "stage_b_thresholds": {
+                "required_xp": config.stage_b_unlock_xp_threshold,
+                "current_xp": earned_xp,
+                "required_stage_a_quests": config.stage_b_unlock_stage_a_completions,
+                "current_stage_a_quests": stage_a_count,
+            },
+            "stage_b_requirements": {
                 "required_xp": config.stage_b_unlock_xp_threshold,
                 "current_xp": earned_xp,
                 "required_stage_a_quests": config.stage_b_unlock_stage_a_completions,

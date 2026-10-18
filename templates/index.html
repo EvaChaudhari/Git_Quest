@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#06030f">
+  <meta name="description" content="BUG//DUNGEON — Turn GitHub issues into epic debugging quests. Every bug is a boss fight.">
+  <title>BUG//DUNGEON — Developer Quest System</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta name="gitquest-api-base" content="">
+</head>
+
+<body>
+
+  <!-- Atmospheric background layers -->
+  <div class="dungeon-fog" aria-hidden="true"></div>
+  <div class="dungeon-fog fog-two" aria-hidden="true"></div>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="ambient ambient-three" aria-hidden="true"></div>
+  <div class="grid-overlay" aria-hidden="true"></div>
+  <div class="scanlines" aria-hidden="true"></div>
+
+  <!-- Floating rune particles -->
+  <div class="rune-particles" aria-hidden="true">
+    <span class="rune">&#x2318;</span><span class="rune">&#x2726;</span><span class="rune">&#x2694;</span>
+    <span class="rune">&#x25C8;</span><span class="rune">&#x2301;</span><span class="rune">&#x2727;</span>
+    <span class="rune">&#x2B21;</span><span class="rune">&#x2300;</span><span class="rune">&#x25C6;</span>
+  </div>
+
+  <div class="app-shell">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="BUG Dungeon home">
+        <div class="brand-emblem">
+          <span class="brand-sword">&#x2694;</span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">BUG<span class="accent">//</span>DUNGEON</span>
+          <span class="brand-sub mono">DEVELOPER QUEST SYSTEM</span>
+        </div>
+      </a>
+
+      <div class="topbar-center">
+        <div class="hud-stat class-hud-stat" id="topbar-class-stat" title="Current Developer Class">
+          <span class="hud-icon" id="topbar-class-icon">&#x1F6E1;</span>
+          <span class="mono" id="topbar-class-name">TS PALADIN</span>
+        </div>
+        <div class="hud-stat" title="Total Experience Points">
+          <span class="hud-icon">&#x26A1;</span>
+          <span class="mono"><span class="xp-val" id="xp-value">0</span> XP</span>
+        </div>
+        <div class="hud-stat" title="Quests Cleared">
+          <span class="hud-icon">&#x2694;</span>
+          <span class="mono"><span class="completed-val" id="completed-count">0</span> CLEARED</span>
+        </div>
+        <div class="hud-stat" title="Habit Consistency Score">
+          <span class="hud-icon">&#x1F525;</span>
+          <span class="mono"><span id="consistency-val">100.0</span>% STREAK</span>
+        </div>
+        <div class="hud-stat" id="topbar-stage-b-stat" title="Stage B Challenge Status">
+          <span class="hud-icon" id="stage-b-hud-icon">&#x1F512;</span>
+          <span class="mono" id="stage-b-hud-text">STAGE B LOCKED</span>
+        </div>
+        <div class="hud-stat" title="Player Level">
+          <span class="level-badge" id="level-badge">LVL 01</span>
+          <span class="mono level-name-display" id="level-name">ROOKIE</span>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <button id="sfx-toggle" class="sfx-btn mono" type="button" title="Toggle sound effects">
+          &#x1F50A; SFX: ON
+        </button>
+        <div class="status-pill">
+          <span class="status-dot pulse"></span>
+          <span class="mono">REALM ONLINE</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+
+      <!-- HERO -->
+      <section class="hero">
+        <div class="hero-eyebrow mono">
+          <span class="eyebrow-line"></span>
+          &#x2694; &nbsp;THE GITVERSE IS IN DANGER&nbsp; &#x2694;
+          <span class="eyebrow-line"></span>
+        </div>
+        <h1>Every bug is a <span class="gradient-text">boss fight.</span></h1>
+        <p class="hero-copy">
+          Paste any public GitHub repository. Descend into the GitVerse dungeons. Battle merge conflicts,<br>
+          hunt syntax anomalies, claim legendary loot drops, and level up your developer instincts.
+        </p>
+
+        <!-- NPC characters (Interactive - click to hear dialogue) -->
+        <div class="npc-header-label mono">&#x25C8; CLICK ANY REALM NPC TO CONSULT &#x25C8;</div>
+        <div class="npc-row" aria-label="Realm Characters and Bosses">
+          
+          <button type="button" class="npc-card" data-npc="nyx" title="Click to speak with Nyx">
+            <div class="npc-sprite">
+              <div class="sprite-body">&#x1F9D9;</div>
+              <div class="sprite-aura aura-purple"></div>
+            </div>
+            <div class="npc-info">
+              <strong>NYX</strong>
+              <span class="mono">AI COMPANION</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card npc-boss-card" data-npc="merge_conflict" title="Click to confront The Merge Conflict">
+            <div class="npc-sprite">
+              <div class="sprite-body">&#x2694;</div>
+              <div class="sprite-aura aura-red"></div>
+            </div>
+            <div class="npc-info">
+              <strong>MERGE CONFLICT</strong>
+              <span class="mono boss-label">&#x26A0; FINAL BOSS</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="aria" title="Click to speak with Aria">
+            <div class="npc-sprite">
+              <div class="sprite-body">&#x1F3F9;</div>
+              <div class="sprite-aura aura-green"></div>
+            </div>
+            <div class="npc-info">
+              <strong>ARIA</strong>
+              <span class="mono">DEPLOYER GUIDE</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="linus" title="Click to speak with Linus">
+            <div class="npc-sprite">
+              <div class="sprite-body">&#x1F441;</div>
+              <div class="sprite-aura aura-gold"></div>
+            </div>
+            <div class="npc-info">
+              <strong>LINUS</strong>
+              <span class="mono">LEGENDARY NPC</span>
+            </div>
+          </button>
+
+          <button type="button" class="npc-card" data-npc="gemma" title="Click to speak with Gemma">
+            <div class="npc-sprite">
+              <div class="sprite-body">&#x2728;</div>
+              <div class="sprite-aura aura-cyan"></div>
+            </div>
+            <div class="npc-info">
+              <strong>GEMMA</strong>
+              <span class="mono">CODE REVIEWER</span>
+            </div>
+          </button>
+
+        </div>
+
+        <!-- CLASS SELECTION -->
+        <div class="class-picker-section" aria-label="Choose your class">
+          <div class="class-picker-title mono">
+            <span class="picker-bullet">&#x2694;</span> CHOOSE YOUR DEVELOPER CLASS
+            <span class="class-hint mono">&middot; STREAK FUELS POWER</span>
+          </div>
+          <div class="class-cards" id="class-cards">
+            
+            <button type="button" class="class-card active" data-class="paladin">
+              <div class="class-badge-icon">&#x1F6E1;</div>
+              <div class="class-details">
+                <span class="class-title">TypeScript Paladin</span>
+                <span class="class-sub mono">Type-Safe Citadel</span>
+                <p class="class-desc">Strict, reliable, principled. Believes type safety is a sacred virtue.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="rogue">
+              <div class="class-badge-icon js">&#x1F5E1;</div>
+              <div class="class-details">
+                <span class="class-title">JavaScript Rogue</span>
+                <span class="class-sub mono">Async Shadow</span>
+                <p class="class-desc">Small, agile, easy to lose in a string. Strikes swiftly across the stack.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="sorcerer">
+              <div class="class-badge-icon py">&#x1F40D;</div>
+              <div class="class-details">
+                <span class="class-title">Python Sorcerer</span>
+                <span class="class-sub mono">Data Alchemist</span>
+                <p class="class-desc">Dynamic incantations and indentation rituals. Commands vast data flows.</p>
+              </div>
+            </button>
+
+            <button type="button" class="class-card" data-class="artificer">
+              <div class="class-badge-icon rs">&#x2699;</div>
+              <div class="class-details">
+                <span class="class-title">Rust Artificer</span>
+                <span class="class-sub mono">Memory Forge</span>
+                <p class="class-desc">Zero-cost abstractions. Wields the borrow checker as an unbreakable shield.</p>
+              </div>
+            </button>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- REPO SCANNER -->
+      <section class="repo-panel dungeon-panel" aria-labelledby="repo-title">
+        <div class="panel-torch left-torch" aria-hidden="true"><span class="torch-flame">&#x1F525;</span></div>
+        <div class="panel-torch right-torch" aria-hidden="true"><span class="torch-flame">&#x1F525;</span></div>
+
+        <div class="panel-heading">
+          <div>
+            <span class="section-kicker mono">[ 01 / INITIALIZE REALM ]</span>
+            <h2 id="repo-title">Choose your dungeon</h2>
+          </div>
+          <span class="pill pill-purple">&#x2694; REPOSITORY SCAN</span>
+        </div>
+
+        <!-- LEARNING MODE SELECTOR -->
+        <div class="learning-mode-section" aria-label="Choose Learning Mode">
+          <div class="mode-header mono">
+            <span class="picker-bullet">&#x2694;</span> CHOOSE LEARNING MODE
+            <span class="class-hint mono">&middot; STAGE B REQUIRES 200 XP &amp; 3 STAGE A QUESTS</span>
+          </div>
+          <div class="mode-toggle-group" role="tablist" aria-label="Learning Mode">
+            <button type="button" class="mode-btn active" id="mode-stage-a-btn" role="tab" aria-selected="true" data-mode="A">
+              <span class="mode-icon">&#x1F4DC;</span>
+              <div class="mode-info">
+                <strong>Stage A: Training Quests</strong>
+                <span class="mono">Closed issues &amp; verified PR evidence (+50 XP)</span>
+              </div>
+            </button>
+            <button type="button" class="mode-btn" id="mode-stage-b-btn" role="tab" aria-selected="false" data-mode="B">
+              <span class="mode-icon" id="mode-b-icon">&#x1F512;</span>
+              <div class="mode-info">
+                <strong id="mode-b-title">Stage B: Open Challenges</strong>
+                <span class="mono" id="mode-b-sub">Live open issues &amp; progressive hints (+100 XP)</span>
+              </div>
+            </button>
+          </div>
+          <div id="stage-b-lock-banner" class="stage-b-locked-card mono" hidden>
+            <div class="lock-icon">&#x1F512;</div>
+            <div class="lock-details">
+              <strong>STAGE B IS CURRENTLY LOCKED</strong>
+              <p>The GitQuest server requires completing at least <strong>3 Stage A Training Quests</strong> and earning <strong>200 XP</strong>.</p>
+              <div class="lock-metrics">
+                <span class="lock-badge" id="lock-xp-metric">XP: 0 / 200</span>
+                <span class="lock-badge" id="lock-quests-metric">Stage A Quests: 0 / 3</span>
+              </div>
+            </div>
+            <button type="button" class="button button-ghost button-sm" id="switch-to-stage-a-btn">&#x2190; Switch to Stage A</button>
+          </div>
+        </div>
+
+        <form id="repo-form" class="repo-form">
+          <label for="repo-url" class="mono">GITHUB REPOSITORY URL</label>
+          <div class="input-row">
+            <span class="input-prefix mono">&#x21B3;</span>
+            <input id="repo-url" name="repo_url" type="url"
+              placeholder="https://github.com/owner/repository"
+              autocomplete="url" spellcheck="false" required>
+            <button id="scan-button" class="button button-primary" type="submit">
+              <span class="button-label">&#x2694; Enter Dungeon</span>
+              <span aria-hidden="true">&#x2197;</span>
+            </button>
+          </div>
+          <p class="field-hint mono" id="repo-field-hint">Paste any public repository to retrieve Stage A closed issues with resolution evidence.</p>
+        </form>
+
+        <div id="global-status" class="status-message" role="status" aria-live="polite" hidden></div>
+      </section>
+
+      <!-- WORLD MAP & SECTORS -->
+      <section id="quest-workspace" class="workspace" aria-live="polite">
+
+        <div class="section-title-row">
+          <div>
+            <span class="section-kicker mono">[ 02 / THE GITVERSE OVERWORLD ]</span>
+            <h2>&#x2694; Overworld Dungeon Map</h2>
+          </div>
+          <div class="quest-count mono" id="quest-count">0 QUESTS FOUND</div>
+        </div>
+
+        <div class="world-map dungeon-panel" id="world-map">
+          <div class="map-header">
+            <div>
+              <span class="map-kicker mono">&#x25C8; INTERACTIVE DUNGEON BIOMES</span>
+              <h2 class="map-title">THE DEBUGGING REALM</h2>
+            </div>
+            <div class="map-header-actions">
+              <button id="quick-demo-btn" type="button" class="button button-ghost demo-btn"
+                title="Scan public pallets/flask repository via real GitQuest API">
+                &#x26A1; Pallets/Flask Sample
+              </button>
+              <div class="map-coordinates mono" id="map-coordinates">SECTOR 00 &middot; UNINITIALIZED</div>
+            </div>
+          </div>
+
+          <!-- MAP STAGE -->
+          <div class="map-stage" id="map-stage">
+            <video class="map-video-bg" autoplay loop muted playsinline poster="{{ url_for('static', filename='world_map.png') }}">
+              <source src="{{ url_for('static', filename='world_map.mp4') }}" type="video/mp4">
+            </video>
+            <div class="map-vignette" aria-hidden="true"></div>
+
+            <!-- SVG dungeon paths with glowing traveling pulses -->
+            <svg class="dungeon-paths" aria-hidden="true" viewBox="0 0 800 420" preserveAspectRatio="none">
+              <defs>
+                <filter id="path-glow">
+                  <feGaussianBlur stdDeviation="3" result="blur"/>
+                  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+                </filter>
+              </defs>
+              <path class="dpath dpath-green"  d="M 175 195 Q 300 130 400 205" filter="url(#path-glow)"/>
+              <path class="dpath dpath-purple" d="M 400 205 Q 510 180 620 165" filter="url(#path-glow)"/>
+              <path class="dpath dpath-gold"   d="M 400 205 Q 415 295 395 365" filter="url(#path-glow)"/>
+              <path class="dpath dpath-red"    d="M 400 205 Q 280 300 195 325" filter="url(#path-glow)"/>
+              <path class="dpath dpath-cyan"   d="M 620 165 Q 680 225 655 325" filter="url(#path-glow)"/>
+              <circle class="path-dot green-dot"  cx="283" cy="155" r="4"/>
+              <circle class="path-dot purple-dot" cx="510" cy="185" r="4"/>
+              <circle class="path-dot gold-dot"   cx="400" cy="282" r="4"/>
+              <circle class="path-dot red-dot"    cx="302" cy="265" r="4"/>
+              <circle class="path-dot cyan-dot"   cx="645" cy="242" r="4"/>
+            </svg>
+
+            <!-- Feature Forest -->
+            <button class="region-node region-forest" type="button" data-region="forest"
+              data-lore="Where new features grow wild and untamed. High concentration of enhancements."
+              title="Feature Forest: Where new features grow wild and untamed">
+              <span class="node-beacon green"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">&#x1F332;</span>
+                <span class="node-glow-ring green-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">FEATURE FOREST</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- World Tree (Core) -->
+            <button class="region-node region-core" type="button" data-region="core"
+              data-lore="The sacred root of the repository. Core refactoring and architectural battles."
+              title="Main Branch World Tree: Sacred root of the repository">
+              <span class="node-beacon purple"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">&#x1F333;</span>
+                <span class="node-glow-ring purple-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">WORLD TREE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- PR Plaza -->
+            <button class="region-node region-plaza" type="button" data-region="plaza"
+              data-lore="Where pending merges face judgment. Community contributions and code reviews."
+              title="Pull Request Plaza: Where pending merges face judgment">
+              <span class="node-beacon gold"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">&#x1F3F0;</span>
+                <span class="node-glow-ring gold-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">PR PLAZA</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Bug Swamp -->
+            <button class="region-node region-swamp" type="button" data-region="swamp"
+              data-lore="A murky wasteland of uncaught exceptions and memory leaks. High XP bug bounties."
+              title="Bug Swamp: Murky wasteland of uncaught exceptions">
+              <span class="node-beacon red"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">&#x1FAB2;</span>
+                <span class="node-glow-ring red-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">BUG SWAMP</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Deprecated Archive -->
+            <button class="region-node region-archive" type="button" data-region="archive"
+              data-lore="Ancient code that refuses to die. Legacy archaeology and technical documentation."
+              title="Deprecated Archive: Ancient code that refuses to die">
+              <span class="node-beacon cyan"></span>
+              <div class="node-icon-wrap">
+                <span class="node-biome-art">&#x1F3DB;</span>
+                <span class="node-glow-ring cyan-ring"></span>
+              </div>
+              <div class="node-tag mono">
+                <span class="node-title">ARCHIVE</span>
+                <span class="node-state"><strong class="node-count">0</strong> QUESTS</span>
+              </div>
+            </button>
+
+            <!-- Legend -->
+            <div class="map-legend mono">
+              <span class="legend-item"><i class="legend-dot green"></i>FOREST</span>
+              <span class="legend-item"><i class="legend-dot purple"></i>CORE</span>
+              <span class="legend-item"><i class="legend-dot gold"></i>PLAZA</span>
+              <span class="legend-item"><i class="legend-dot red"></i>SWAMP</span>
+              <span class="legend-item"><i class="legend-dot cyan"></i>ARCHIVE</span>
+            </div>
+          </div><!-- /map-stage -->
+
+          <div id="region-message" class="region-message mono">
+            &#x25C8; Scan a repository or select any dungeon sector above to view active quests.
+          </div>
+        </div><!-- /world-map -->
+
+        <!-- QUEST BOARD -->
+        <div class="section-title-row quest-heading">
+          <div>
+            <span class="section-kicker mono">[ 03 / QUEST BOARD ]</span>
+            <h2>&#x2694; Available Quests</h2>
+          </div>
+          <div class="quest-filter mono" id="quest-filter">ALL REGIONS</div>
+        </div>
+
+        <div class="workspace-grid">
+          <div class="quest-column">
+            <div id="issues-list" class="issues-list">
+              <div class="empty-state dungeon-panel">
+                <div class="empty-dungeon-art" aria-hidden="true">
+                  <span class="empty-torch">&#x1F525;</span>
+                  <div class="empty-gate"><div class="gate-arch">&#x2301;</div></div>
+                  <span class="empty-torch">&#x1F525;</span>
+                </div>
+                <h3>Your next adventure awaits</h3>
+                <p>Scan a repository to reveal open issues, clues, and quests.</p>
+                <span class="empty-code mono">AWAITING_REPOSITORY_INPUT_</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Side Column -->
+          <aside class="side-column">
+
+            <!-- NYX Briefing Panel -->
+            <section class="dungeon-panel briefing-panel" aria-labelledby="briefing-title">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker mono">MISSION CONTROL</span>
+                  <h2 id="briefing-title">Quest Briefing</h2>
+                </div>
+                <span class="orb rotating-orb">&#x2726;</span>
+              </div>
+
+              <!-- Boss Alert Banner (appears for Boss/Bug Quests) -->
+              <div id="boss-alert-banner" class="boss-alert-banner mono" hidden>
+                <span class="boss-alert-glitch">&lt;&lt;&lt;&lt;&lt;&lt;&lt; HEAD</span>
+                <span>BOSS ENCOUNTER: MERGE CONFLICT DETECTED</span>
+                <span class="boss-alert-glitch">&gt;&gt;&gt;&gt;&gt;&gt;&gt; main</span>
+              </div>
+
+              <div id="briefing-text" class="briefing-text muted">
+                Your companion will brief you once a quest is selected.
+              </div>
+
+              <div class="divider rune-divider"><span>&#x2694;</span></div>
+
+              <div class="companion-head">
+                <div class="nyx-avatar">
+                  <span class="nyx-rune">N</span>
+                  <div class="nyx-ring"></div>
+                </div>
+                <div class="companion-info">
+                  <strong>NYX</strong>
+                  <span class="companion-sub mono">AI DUNGEON COMPANION</span>
+                </div>
+                <span class="live-tag">LIVE</span>
+              </div>
+
+              <div id="companion-dialogue" class="dialogue">
+                <em>&#x201C;A good investigator studies the clues before attacking the boss.&#x201D;</em>
+              </div>
+
+              <div class="action-buttons">
+                <button id="explain-button" class="button button-secondary" type="button" disabled>
+                  &#x1F50D; Explain Issue
+                </button>
+                <button id="hint-button" class="button button-ghost" type="button" disabled>
+                  &#x1F4A1; Get Hint &#x2197;
+                </button>
+              </div>
+
+              <div id="companion-status" class="mini-status mono" role="status" aria-live="polite"></div>
+              <div id="investigation-slot"></div>
+            </section>
+
+            <!-- Player Profile -->
+            <section class="dungeon-panel progress-panel" aria-labelledby="profile-title">
+              <div class="panel-heading compact">
+                <div>
+                  <span class="section-kicker mono">PLAYER STATUS</span>
+                  <h2 id="profile-title">Investigator Profile</h2>
+                </div>
+                <span class="level-badge" id="profile-level-badge">LVL 01</span>
+              </div>
+
+              <!-- Current Class Card -->
+              <div class="profile-class-banner">
+                <span class="class-banner-icon" id="profile-class-icon">&#x1F6E1;</span>
+                <div class="class-banner-text">
+                  <strong id="profile-class-name">TypeScript Paladin</strong>
+                  <span class="mono muted" id="profile-class-sub">Type-Safe Citadel</span>
+                </div>
+              </div>
+
+              <div class="xp-row">
+                <span class="mono">EXPERIENCE POINTS</span>
+                <strong><span class="xp-val" id="profile-xp-value">0</span> XP</strong>
+              </div>
+              <div class="progress-track" aria-label="XP progress">
+                <div id="xp-progress" class="progress-fill" style="width:0%"></div>
+                <div class="progress-glow"></div>
+              </div>
+              <div class="progress-labels mono">
+                <span id="profile-level-name">ROOKIE</span>
+                <span id="next-level">500 XP TO LEVEL 2</span>
+              </div>
+
+              <div class="divider rune-divider"><span>&#x25C8;</span></div>
+
+              <div class="stats-grid stats-grid-4">
+                <div class="stat-cell">
+                  <span class="stat-number completed-val" id="profile-completed-count">0</span>
+                  <span class="stat-label mono">TOTAL CLEARED</span>
+                </div>
+                <div class="stat-cell">
+                  <span class="stat-number" id="profile-stage-a-count">0</span>
+                  <span class="stat-label mono">STAGE A QUESTS</span>
+                </div>
+                <div class="stat-cell">
+                  <span class="stat-number" id="profile-consistency-score">100.0%</span>
+                  <span class="stat-label mono">CONSISTENCY</span>
+                </div>
+                <div class="stat-cell">
+                  <span class="stat-number stage-status-locked" id="profile-stage-b-status">LOCKED</span>
+                  <span class="stat-label mono">STAGE B STATUS</span>
+                </div>
+              </div>
+
+              <div class="stage-b-progress-box mono" id="profile-stage-b-box">
+                <div class="progress-box-header">&#x1F512; STAGE B UNLOCK PROGRESS</div>
+                <div class="progress-box-item" id="prog-xp-row">
+                  <span>Earned XP (min 200):</span>
+                  <strong id="prog-xp-val">0 / 200</strong>
+                </div>
+                <div class="progress-box-item" id="prog-quests-row">
+                  <span>Stage A Quests (min 3):</span>
+                  <strong id="prog-quests-val">0 / 3</strong>
+                </div>
+              </div>
+
+              <div class="divider rune-divider"><span>&#x2727;</span></div>
+
+              <div class="badge-row">
+                <div class="badge-icon-wrap">
+                  <span class="badge-icon">&#x2727;</span>
+                  <div class="badge-glow"></div>
+                </div>
+                <div>
+                  <strong id="achievement-name">Unranked Investigator</strong>
+                  <p id="achievement-description" class="muted">
+                    Complete your first investigation to earn a badge.
+                  </p>
+                </div>
+              </div>
+
+              <!-- LOOT DROPS INVENTORY -->
+              <div class="divider rune-divider"><span>&#x2694;</span></div>
+              <div class="loot-section">
+                <div class="loot-heading">
+                  <span class="loot-label mono">DUNGEON LOOT DROP</span>
+                  <span class="loot-unlocked-count mono" id="loot-count">0/4 UNLOCKED</span>
+                </div>
+                <div class="loot-slots" id="loot-slots">
+                  
+                  <div class="loot-slot empty" data-loot-id="dagger" data-threshold="1"
+                    title="Console.log Dagger: Unlocks at 1 Quest Cleared">
+                    <span class="slot-art">&#x1F5E1;</span>
+                    <span class="slot-lock">&#x1F512;</span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="shield" data-threshold="2"
+                    title="Pending PR Shield: Unlocks at 2 Quests Cleared">
+                    <span class="slot-art">&#x1F6E1;</span>
+                    <span class="slot-lock">&#x1F512;</span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="branch" data-threshold="3"
+                    title="Crystallized Branch: Unlocks at 3 Quests Cleared">
+                    <span class="slot-art">&#x1F52E;</span>
+                    <span class="slot-lock">&#x1F512;</span>
+                  </div>
+
+                  <div class="loot-slot empty" data-loot-id="crown" data-threshold="5"
+                    title="Crown of Force Push: Unlocks at 5 Quests Cleared">
+                    <span class="slot-art">&#x1F451;</span>
+                    <span class="slot-lock">&#x1F512;</span>
+                  </div>
+
+                </div>
+                <div class="loot-item-detail mono" id="loot-detail">
+                  Hover over or unlock gear to inspect lore & stats.
+                </div>
+              </div>
+
+            </section>
+
+            <!-- Linus NPC Wisdom -->
+            <section class="dungeon-panel npc-panel">
+              <div class="ancient-npc">
+                <div class="ancient-portrait">
+                  <span class="ancient-emoji">&#x1F441;</span>
+                  <div class="ancient-glow"></div>
+                </div>
+                <div class="ancient-text">
+                  <div class="ancient-header-row">
+                    <span class="mono ancient-name">LINUS &middot; ANCIENT NPC</span>
+                    <button type="button" class="wisdom-btn mono" id="wisdom-btn" title="Hear new wisdom">&#x21BB; WISDOM</button>
+                  </div>
+                  <p class="ancient-quote" id="ancient-quote">
+                    <em>&#x201C;Fellow developer, every PR you merged, every bug you squashed — they were training. In the GitVerse, your consistency has power.&#x201D;</em>
+                  </p>
+                </div>
+              </div>
+            </section>
+
+          </aside>
+        </div><!-- /workspace-grid -->
+      </section><!-- /quest-workspace -->
+    </main>
+
+    <!-- NPC Dialogue Modal -->
+    <div id="npc-dialogue-modal" class="npc-modal" hidden>
+      <div class="npc-modal-backdrop" id="npc-modal-close-backdrop"></div>
+      <div class="npc-modal-box dungeon-panel">
+        <div class="npc-modal-header">
+          <div class="npc-modal-avatar" id="modal-npc-avatar">&#x1F9D9;</div>
+          <div>
+            <h3 id="modal-npc-name">NYX</h3>
+            <span class="mono modal-npc-title" id="modal-npc-role">AI COMPANION</span>
+          </div>
+          <button type="button" class="modal-close-btn" id="modal-close-btn" aria-label="Close dialog">&times;</button>
+        </div>
+        <div class="divider rune-divider"><span>&#x2694;</span></div>
+        <div class="npc-modal-body" id="modal-npc-speech"></div>
+        <div class="npc-modal-footer mono">
+          <span class="npc-voice-tag">[ VOICE TRANSMISSION COMPLETE ]</span>
+        </div>
+      </div>
+    </div>
+
+    <footer class="dungeon-footer">
+      <div class="footer-inner">
+        <span class="mono footer-brand">&#x2694; BUG//DUNGEON</span>
+        <span class="footer-tagline">Code feeds power. Power conquers dungeons. Dungeons drop loot.</span>
+        <span class="mono footer-build">GITVERSE PROTOCOL &middot; BUILD 004</span>
+      </div>
+    </footer>
+
+  </div><!-- /app-shell -->
+
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>
