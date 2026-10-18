@@ -150,6 +150,214 @@ class TestAppBackend(unittest.TestCase):
             self.assertEqual(response.status_code, 500)
             self.assertEqual(response.get_json(), {"error": "An internal server error occurred."})
 
+    def test_post_quest_success_with_issue_wrapper(self):
+        """POST /api/quest with {'issue': {...}} returns 200 and {'quest': {...}}."""
+        sample_issue = {
+            "number": 1,
+            "title": "Fix navbar bug",
+            "body": "Bug description",
+            "labels": ["bug"],
+            "html_url": "https://github.com/owner/repo/issues/1",
+            "repo": "owner/repo",
+        }
+        mock_raw_quest = {
+            "quest_id": "quest_owner_repo_1",
+            "quest_title": "Fix the Nav Shield",
+            "tagline": "Protect the console",
+            "difficulty": "Novice",
+            "category": "Bug Squashing",
+            "xp_reward": 200,
+            "estimated_time_minutes": 15,
+            "briefing": {
+                "lore_intro": "Incoming alert",
+                "technical_summary": "Navbar fails on mobile viewports."
+            },
+            "objectives": [
+                {"step": 1, "title": "Inspect Breakpoints", "instruction": "Check CSS"}
+            ],
+            "hints": [
+                {"level": 1, "tier": "Gentle Nudge", "hint": "Look at navbar.js", "xp_cost": 10}
+            ],
+        }
+        with patch("app.generate_quest", return_value=mock_raw_quest) as mock_gen:
+            response = self.client.post(
+                "/api/quest",
+                json={"issue": sample_issue},
+            )
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertIn("quest", data)
+            quest = data["quest"]
+            self.assertEqual(quest["title"], "Fix the Nav Shield")
+            self.assertEqual(quest["explanation"], "Navbar fails on mobile viewports.")
+            self.assertEqual(quest["difficulty"], "Novice")
+            self.assertEqual(len(quest["steps"]), 1)
+            self.assertEqual(len(quest["hints"]), 1)
+            self.assertEqual(quest["xp"], 200)
+            mock_gen.assert_called_once()
+
+    def test_post_quest_success_with_direct_issue_body(self):
+        """POST /api/quest with direct issue object in body returns 200 and {'quest': {...}}."""
+        sample_issue = {
+            "number": 2,
+            "title": "Add documentation",
+            "body": "Docs description",
+            "labels": ["documentation"],
+            "html_url": "https://github.com/owner/repo/issues/2",
+            "repo": "owner/repo",
+        }
+        mock_raw_quest = {
+            "quest_id": "quest_owner_repo_2",
+            "quest_title": "Archive of Lore",
+            "tagline": "Scribe the knowledge",
+            "difficulty": "Novice",
+            "category": "Docs & Discovery",
+            "xp_reward": 100,
+            "estimated_time_minutes": 20,
+            "briefing": {
+                "lore_intro": "The archives are incomplete",
+                "technical_summary": "Missing docs for Cloudflare hosting."
+            },
+            "objectives": [
+                {"step": 1, "title": "Write Docs", "instruction": "Add section to docs"}
+            ],
+            "hints": [
+                {"level": 1, "tier": "Gentle Nudge", "hint": "Check docs folder", "xp_cost": 10}
+            ],
+        }
+        with patch("app.generate_quest", return_value=mock_raw_quest) as mock_gen:
+            response = self.client.post("/api/quest", json=sample_issue)
+            self.assertEqual(response.status_code, 200)
+            data = response.get_json()
+            self.assertIn("quest", data)
+            quest = data["quest"]
+            self.assertEqual(quest["title"], "Archive of Lore")
+            self.assertEqual(quest["xp"], 100)
+            mock_gen.assert_called_once()
+
+    def test_post_quest_missing_content_type(self):
+        """POST /api/quest with non-JSON body returns 400."""
+        response = self.client.post("/api/quest", data="not-json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Content-Type: application/json", response.get_json()["error"])
+
+    def test_post_quest_empty_body(self):
+        """POST /api/quest with empty object returns 400."""
+        response = self.client.post("/api/quest", json={})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Field 'issue' is required", response.get_json()["error"])
+
+    def test_post_quest_invalid_number_400(self):
+        """POST /api/quest with missing or non-integer number returns 400."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "Test", "repo": "owner/repo", "number": "invalid"}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("number", response.get_json()["error"])
+
+    def test_post_quest_invalid_title_400(self):
+        """POST /api/quest with missing or empty title returns 400."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "   ", "repo": "owner/repo", "number": 10}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("title", response.get_json()["error"])
+
+    def test_post_quest_invalid_repo_400(self):
+        """POST /api/quest with missing repo returns 400."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "Test Title", "repo": "", "number": 10}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("repo", response.get_json()["error"])
+
+    def test_post_quest_invalid_labels_type_400(self):
+        """POST /api/quest with labels not being a list returns 400."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "Test", "repo": "owner/repo", "number": 10, "labels": "invalid"}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("labels", response.get_json()["error"])
+
+    def test_post_quest_invalid_body_type_400(self):
+        """POST /api/quest with body not being a string returns 400."""
+        response = self.client.post(
+            "/api/quest",
+            json={"issue": {"title": "Test", "repo": "owner/repo", "number": 10, "body": 12345}},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("body", response.get_json()["error"])
+
+    def test_post_quest_missing_api_key_503(self):
+        """POST /api/quest when AI key is missing returns 503 gracefully."""
+        from ai_service import AIKeyMissingError
+
+        sample_issue = {"number": 1, "title": "Test", "repo": "owner/repo"}
+        with patch("app.generate_quest", side_effect=AIKeyMissingError("Key missing")):
+            response = self.client.post("/api/quest", json={"issue": sample_issue})
+            self.assertEqual(response.status_code, 503)
+            self.assertIn("missing API key", response.get_json()["error"])
+
+    def test_post_quest_schema_validation_error_502(self):
+        """POST /api/quest on schema validation failure returns 502 gracefully."""
+        from ai_service import AISchemaValidationError
+
+        sample_issue = {"number": 1, "title": "Test", "repo": "owner/repo"}
+        with patch("app.generate_quest", side_effect=AISchemaValidationError("Invalid JSON")):
+            response = self.client.post("/api/quest", json={"issue": sample_issue})
+            self.assertEqual(response.status_code, 502)
+            self.assertIn("Failed to generate a valid quest", response.get_json()["error"])
+
+    def test_post_quest_returned_quest_missing_required_fields_502(self):
+        """POST /api/quest fails with 502 when returned quest lacks required fields."""
+        sample_issue = {"number": 1, "title": "Test", "repo": "owner/repo"}
+        # Missing 'steps' / 'objectives' and 'explanation'
+        incomplete_quest = {"title": "Only Title", "difficulty": "Novice", "xp": 100}
+        with patch("app.generate_quest", return_value=incomplete_quest):
+            response = self.client.post("/api/quest", json={"issue": sample_issue})
+            self.assertEqual(response.status_code, 502)
+            self.assertIn("Failed to generate a valid quest", response.get_json()["error"])
+
+    def test_post_quest_service_error_502(self):
+        """POST /api/quest on model failure returns 502 gracefully."""
+        from ai_service import AIServiceError
+
+        sample_issue = {"number": 1, "title": "Test", "repo": "owner/repo"}
+        with patch("app.generate_quest", side_effect=AIServiceError("Upstream failure")):
+            response = self.client.post("/api/quest", json={"issue": sample_issue})
+            self.assertEqual(response.status_code, 502)
+            self.assertIn("encountered an error", response.get_json()["error"])
+
+    def test_cors_allowed_origins(self):
+        """Test CORS headers on /api/* for allowed origins."""
+        for origin in ["http://localhost:3000", "http://localhost:5173"]:
+            response = self.client.options(
+                "/api/quest",
+                headers={
+                    "Origin": origin,
+                    "Access-Control-Request-Method": "POST",
+                },
+            )
+            self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), origin)
+
+    def test_cors_disallowed_origin(self):
+        """Test CORS headers are not granted to disallowed origin."""
+        response = self.client.options(
+            "/api/quest",
+            headers={
+                "Origin": "http://malicious.example.com",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        self.assertNotEqual(
+            response.headers.get("Access-Control-Allow-Origin"),
+            "http://malicious.example.com",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
