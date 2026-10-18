@@ -40,7 +40,7 @@ class TestFrontendIntegration(unittest.TestCase):
         resp = self.client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
         self.assertEqual(resp.status_code, 200)
         html = resp.get_data(as_text=True)
-        self.assertIn("BUG//DUNGEON", html)
+        self.assertIn("GIT QUEST", html)
         self.assertIn('meta name="gitquest-api-base"', html)
 
     def test_serve_app_page(self):

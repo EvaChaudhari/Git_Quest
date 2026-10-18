@@ -44,7 +44,7 @@ class TestAppBackend(unittest.TestCase):
         """GET / with Accept: text/html returns the frontend HTML."""
         response = self.client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
         self.assertEqual(response.status_code, 200)
-        self.assertIn("BUG//DUNGEON", response.get_data(as_text=True))
+        self.assertIn("GIT QUEST", response.get_data(as_text=True))
 
     def test_post_issues_valid_url(self):
         """POST /api/issues returns normalized issues and count."""

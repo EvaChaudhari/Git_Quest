@@ -57,6 +57,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.config["TEMPLATES_AUTO_RELOAD"] = True
 
 # Configure CORS specifically for development and configured frontend origins on API routes
 _raw_origins = os.getenv("GITQUEST_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
