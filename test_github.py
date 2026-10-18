@@ -18,6 +18,7 @@ from github_service import (
     GitHubRateLimitError,
     GitHubRepoNotFoundError,
     GitHubServiceError,
+    clear_github_cache,
     get_closed_issues,
     get_closed_issues_with_evidence,
     get_issue_resolution_evidence,
@@ -98,6 +99,12 @@ class TestParseRepoUrl(unittest.TestCase):
 
 class TestGetIssuesMocked(unittest.TestCase):
     """Offline unit tests for get_issues using mocked HTTP responses."""
+
+    def setUp(self):
+        clear_github_cache()
+
+    def tearDown(self):
+        clear_github_cache()
 
     @patch("requests.get")
     def test_correct_normalized_issue_fields(self, mock_get):
@@ -262,9 +269,36 @@ class TestGetIssuesMocked(unittest.TestCase):
             get_issues("https://github.com/owner/repo")
         self.assertIn("timed out", str(ctx.exception))
 
+    @patch("requests.get")
+    def test_caching_prevents_duplicate_network_calls(self, mock_get):
+        """Verify repeated calls for same repo and limit return cached data without extra network calls."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"number": 1, "title": "Issue 1", "body": "Body 1", "labels": []}
+        ]
+        mock_response.links = {}
+        mock_get.return_value = mock_response
+
+        # First call hits mock_get
+        issues1 = get_issues("https://github.com/owner/repo", limit=5)
+        self.assertEqual(len(issues1), 1)
+        self.assertEqual(mock_get.call_count, 1)
+
+        # Second call hits cache; call_count remains 1
+        issues2 = get_issues("https://github.com/owner/repo", limit=5)
+        self.assertEqual(len(issues2), 1)
+        self.assertEqual(mock_get.call_count, 1)
+
 
 class TestResolutionEvidenceMocked(unittest.TestCase):
     """Unit tests for resolution evidence extraction and diff sanitization."""
+
+    def setUp(self):
+        clear_github_cache()
+
+    def tearDown(self):
+        clear_github_cache()
 
     def test_sanitize_diff_patch_redacts_secrets_and_skips_unwanted_files(self):
         """Sanitizer should redact potential keys and skip lock/minified files."""

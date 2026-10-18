@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+import subprocess
+import time
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -21,6 +23,50 @@ load_dotenv()
 GITHUB_API_BASE_URL = "https://api.github.com"
 MAX_ISSUES_LIMIT = 10
 DEFAULT_TIMEOUT_SECONDS = 10
+CACHE_TTL_ISSUES_SECONDS = 600       # 10 minutes for repository issues lists
+CACHE_TTL_EVIDENCE_SECONDS = 3600    # 1 hour for resolution evidence
+
+# In-memory TTL cache: key -> (timestamp, data)
+_CACHE: dict[str, tuple[float, Any]] = {}
+_AUTO_DISCOVERED_TOKEN: Optional[str] = None
+_DISCOVERY_ATTEMPTED: bool = False
+
+
+def clear_github_cache() -> None:
+    """Clear all cached GitHub API responses from memory."""
+    _CACHE.clear()
+
+
+def _discover_git_token() -> Optional[str]:
+    """Attempt to retrieve a GitHub token from the local git credential helper.
+
+    Provides seamless zero-config authentication when the developer has already
+    authenticated with GitHub in their local development environment.
+    """
+    global _AUTO_DISCOVERED_TOKEN, _DISCOVERY_ATTEMPTED
+    if _DISCOVERY_ATTEMPTED:
+        return _AUTO_DISCOVERED_TOKEN
+
+    _DISCOVERY_ATTEMPTED = True
+    try:
+        proc = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n\n",
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                if line.startswith("password="):
+                    cand = line.split("=", 1)[1].strip()
+                    if cand and not cand.startswith("your_"):
+                        _AUTO_DISCOVERED_TOKEN = cand
+                        return cand
+    except Exception:
+        pass
+    return None
 
 
 class GitHubServiceError(Exception):
@@ -123,6 +169,9 @@ def _get_headers() -> dict[str, str]:
     }
 
     token = os.getenv("GITHUB_TOKEN")
+    if not token or not token.strip() or token.strip().startswith("your_"):
+        token = _discover_git_token()
+
     if token and token.strip() and not token.strip().startswith("your_"):
         headers["Authorization"] = f"Bearer {token.strip()}"
 
@@ -216,16 +265,23 @@ def sanitize_diff_patch(filename: str, raw_patch: str) -> Optional[str]:
     return _sanitize_patch(raw_patch)
 
 
-def get_issues(repo_url: str, limit: int = 10, state: str = "open") -> list[dict[str, Any]]:
+def get_issues(
+    repo_url: str,
+    limit: int = 10,
+    state: str = "open",
+    use_cache: bool = True,
+) -> list[dict[str, Any]]:
     """Retrieve issues for a given GitHub repository.
 
     Excludes pull requests and normalizes each issue into the standard structure.
-    Limits results to a maximum of 10 for the prototype.
+    Limits results to a maximum of 10 for the prototype. Uses an in-memory cache
+    to avoid burning rate limits on repeat requests.
 
     Args:
         repo_url: The URL of the GitHub repository.
         limit: Number of issues to retrieve (capped at 10 for prototype).
         state: State of issues to fetch: 'open', 'closed', or 'all' (defaults to 'open').
+        use_cache: Whether to use cached results if available within TTL.
 
     Returns:
         A list of normalized issue dictionaries.
@@ -245,6 +301,12 @@ def get_issues(repo_url: str, limit: int = 10, state: str = "open") -> list[dict
     target_limit = min(limit, MAX_ISSUES_LIMIT)
     if target_limit <= 0:
         return []
+
+    cache_key = f"issues:{owner}/{repo}:{state}:{target_limit}"
+    if use_cache and cache_key in _CACHE:
+        cached_time, cached_val = _CACHE[cache_key]
+        if time.time() - cached_time < CACHE_TTL_ISSUES_SECONDS:
+            return [dict(item) for item in cached_val]
 
     api_url = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}/issues"
     headers = _get_headers()
@@ -325,12 +387,17 @@ def get_issues(repo_url: str, limit: int = 10, state: str = "open") -> list[dict
                 f"GitHub API request failed with HTTP status {response.status_code} for '{owner}/{repo}'."
             )
 
+    if use_cache:
+        _CACHE[cache_key] = (time.time(), [dict(item) for item in normalized_issues])
+
     return normalized_issues
 
 
-def get_closed_issues(repo_url: str, limit: int = 10) -> list[dict[str, Any]]:
+def get_closed_issues(
+    repo_url: str, limit: int = 10, use_cache: bool = True
+) -> list[dict[str, Any]]:
     """Retrieve closed issues for a given repository (Stage A learning source)."""
-    return get_issues(repo_url, limit=limit, state="closed")
+    return get_issues(repo_url, limit=limit, state="closed", use_cache=use_cache)
 
 
 def get_issue_resolution_evidence(
@@ -338,6 +405,7 @@ def get_issue_resolution_evidence(
     repo_or_issue_number: Any,
     issue_number: Optional[int] = None,
     timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     """Retrieve verified resolution evidence for a closed issue using GitHub REST APIs.
 
@@ -369,6 +437,17 @@ def get_issue_resolution_evidence(
         repo = str(repo_or_issue_number)
         issue_number = int(issue_number)
 
+    cache_key = f"evidence:{owner}/{repo}:{issue_number}"
+    if use_cache and cache_key in _CACHE:
+        cached_time, cached_val = _CACHE[cache_key]
+        if time.time() - cached_time < CACHE_TTL_EVIDENCE_SECONDS:
+            return dict(cached_val)
+
+    def _finish(res: dict[str, Any]) -> dict[str, Any]:
+        if use_cache:
+            _CACHE[cache_key] = (time.time(), dict(res))
+        return res
+
     base_api = f"{GITHUB_API_BASE_URL}/repos/{owner}/{repo}"
     headers = _get_headers()
     issue_url = f"https://github.com/{owner}/{repo}/issues/{issue_number}"
@@ -392,7 +471,7 @@ def get_issue_resolution_evidence(
 
     issue_data = issue_resp.json()
     if issue_data.get("state") != "closed":
-        return {
+        return _finish({
             "status": "unavailable",
             "issue_number": issue_number,
             "repo": f"{owner}/{repo}",
@@ -403,7 +482,7 @@ def get_issue_resolution_evidence(
             "patch_excerpt": None,
             "evidence_summary": "Issue is currently open. No resolution evidence exists.",
             "uncertainty_notes": "Open issues do not have verified closing resolutions.",
-        }
+        })
 
     # 2. Query Timeline to find linked pull requests or closing commits
     candidate_pr_number: Optional[int] = None
@@ -514,7 +593,7 @@ def get_issue_resolution_evidence(
                     commit_url = f"https://github.com/{owner}/{repo}/commit/{merge_commit}" if merge_commit else None
                     sources = [s for s in [linked_url, commit_url] if s]
 
-                    return {
+                    return _finish({
                         "status": "verified",
                         "issue_number": issue_number,
                         "repo": f"{owner}/{repo}",
@@ -534,12 +613,12 @@ def get_issue_resolution_evidence(
                         "summary": f"Issue resolved by merged Pull Request #{candidate_pr_number} ('{pr_title}').",
                         "uncertainty_notes": None,
                         "evidence_sources": sources,
-                    }
+                    })
 
                 else:
                     # PR exists but was not merged
                     linked_url = linked_pr_info.get("html_url")
-                    return {
+                    return _finish({
                         "status": "partial",
                         "issue_number": issue_number,
                         "repo": f"{owner}/{repo}",
@@ -556,14 +635,14 @@ def get_issue_resolution_evidence(
                         "summary": f"Linked Pull Request #{candidate_pr_number} ('{pr_title}') was identified, but is closed without being merged.",
                         "uncertainty_notes": "PR was closed without merge; fix may have been applied via another branch or abandoned.",
                         "evidence_sources": [linked_url] if linked_url else [],
-                    }
+                    })
         except requests.exceptions.RequestException:
             pass
 
     # 4. If direct closing commit found
     if closing_commit_sha:
         commit_url = closing_commit_url or f"https://github.com/{owner}/{repo}/commit/{closing_commit_sha}"
-        return {
+        return _finish({
             "status": "verified",
             "issue_number": issue_number,
             "repo": f"{owner}/{repo}",
@@ -583,10 +662,10 @@ def get_issue_resolution_evidence(
             "summary": f"Issue closed directly by commit {closing_commit_sha[:8]}.",
             "uncertainty_notes": "Direct commit resolution identified without linked pull request.",
             "evidence_sources": [commit_url],
-        }
+        })
 
     # 5. Unavailable evidence
-    return {
+    return _finish({
         "status": "unavailable",
         "issue_number": issue_number,
         "repo": f"{owner}/{repo}",
@@ -603,16 +682,17 @@ def get_issue_resolution_evidence(
         "summary": "Issue is closed, but no merged pull request or commit was identified in the issue timeline.",
         "uncertainty_notes": "Resolution details could not be verified from the repository timeline.",
         "evidence_sources": [],
-    }
+    })
 
 
 def get_closed_issues_with_evidence(
     repo_url: str,
     limit: int = 5,
     fetch_evidence_details: bool = True,
+    use_cache: bool = True,
 ) -> list[dict[str, Any]]:
     """Retrieve closed issues and annotate each with resolution evidence status."""
-    issues = get_closed_issues(repo_url, limit=limit)
+    issues = get_closed_issues(repo_url, limit=limit, use_cache=use_cache)
     if not fetch_evidence_details or not issues:
         return issues
 
@@ -622,7 +702,9 @@ def get_closed_issues_with_evidence(
     for issue in issues:
         issue_copy = dict(issue)
         try:
-            evidence = get_issue_resolution_evidence(owner, repo, int(issue["number"]))
+            evidence = get_issue_resolution_evidence(
+                owner, repo, int(issue["number"]), use_cache=use_cache
+            )
             issue_copy["evidence_status"] = evidence["status"]
             issue_copy["evidence_summary"] = evidence["evidence_summary"]
             issue_copy["linked_pr_number"] = (
